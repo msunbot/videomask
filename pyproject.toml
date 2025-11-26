@@ -1,0 +1,13 @@
+[project]
+name = "videomask"
+version = "0.0.1"
+description = "Programmatic video segmentation datasets (SAM-3 ready)"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "Pillow",
+    "click",
+]
+
+[project.scripts]
+videomask = "videomask.cli:main"

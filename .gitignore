@@ -1,0 +1,14 @@
+# virtualenvs
+.venv/
+venv/
+venv-3.11/
+
+# Python
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+
+# Outputs
+outputs/

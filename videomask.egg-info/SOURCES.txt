@@ -1,0 +1,9 @@
+pyproject.toml
+videomask/__init__.py
+videomask.egg-info/PKG-INFO
+videomask.egg-info/SOURCES.txt
+videomask.egg-info/dependency_links.txt
+videomask.egg-info/entry_points.txt
+videomask.egg-info/requires.txt
+videomask.egg-info/top_level.txt
+videomask/core/video_reader.py

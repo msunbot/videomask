@@ -39,7 +39,7 @@
 
 ---
 
-### Day 4 (Nov 25) — SAM-3 GPU Prototype (in progress) ⚙️
+### Day 4 (Nov 25) — SAM-3 GPU Prototype ✅
 - [x] Installed CUDA PyTorch in Colab; resolved NCCL errors
 - [x] Installed SAM-3 from GitHub
 - [x] Logged into Hugging Face; weights download works
@@ -70,11 +70,71 @@
 
 ---
 
-## Week 2 Plan (Days 5–10)
-- [ ] Implement finalized `SAM3Backend.load()` logic  
-- [ ] Implement `segment_frame()` with Colab-tested inference workflow  
-- [ ] Add text-prompt config and mask selection policies  
-- [ ] Add a full Colab example notebook to `examples/`  
-- [ ] Add `examples/sam3_example.py`  
-- [ ] Complete README: install, quickstart, examples, roadmap  
-- [ ] Publish code + announce launch
+## Week 2 (Days 5–10): SAM-3 Integration, Testing & Release Preparation
+
+### Day 5 (Nov 27) — Implement Real SAM3Backend Logic & Helper Functions ✅
+- [x] Implemented `_safe_select_binary_mask` (GPU-agnostic unit-tested logic)
+- [x] Integrated Colab-tested pipeline into `segment_frame()`
+- [x] Added safe fallback for device mismatch (CPU fallback messaging)
+- [x] Added `SAM3NotAvailableError` for clean UX  
+**Result:** Fully functional SAM-3 backend ready for GPU environments
+
+---
+
+### Day 6 (Nov 27) — SAM-3 Example Script + CLI Verification (GPU) ✅
+- [x] Added `examples/sam3_example.py`
+- [x] Verified example <-> CLI consistency on GPU
+- [x] Generated `outputs/sam3_example/` dataset from real SAM-3 run  
+**Result:** Demonstrated complete SAM-3 → dataset flow
+
+---
+
+### Day 7 (Nov 27) — Unit Tests + Selection Logic Tests (CPU) ✅
+- [x] Added tests for mask-selection logic using fake tensors
+- [x] Verified behavior: empty masks, thresholding, picking highest score
+- [x] All tests passed locally (`pytest`)  
+**Result:** Stable core logic independent of GPU availability
+
+---
+
+### Day 8 (Nov 27) — README + Docs Cleanup (Copy-Paste Safe MD) ✅
+- [x] Created clean `README.md` (no nested code fences)
+- [x] Updated `TECHNICAL_DESIGN.md` (Markdown-confirmed)
+- [x] Updated `CHANGELOG.md` and `PROGRESS.md`
+- [x] Standardized directory naming and examples  
+**Result:** Public-facing documentation ready for v0.1
+
+---
+
+### Day 9 (Nov 27) — GitHub Cleanup, .gitignore, Repo Reset & Push Fixes ✅
+- [x] Removed large mistakenly committed virtualenv
+- [x] Reset `.git` to clean history
+- [x] Added `.gitignore` for venv, outputs, OS artifacts
+- [x] Successfully pushed clean repo to GitHub  
+**Result:** Repo ready for public release and contributions
+
+---
+
+### Day 10 (Nov 27) — Final Validation & v0.1 Release Prep 🎉
+- [x] Ran local smoke tests (dummy backend)
+- [x] Ran GPU tests (SAM-3 backend)
+- [x] Confirmed code style, comments, file structure
+- [x] Verified outputs (frames, masks, metadata)
+- [x] Prepared repo for launch announcement  
+**Result:** VideoMask SDK v0.1 complete and ready to ship
+
+---
+
+# Week 2 Summary
+**Completed:**  
+- SAM-3 backend (functional)  
+- Example scripts (dummy + SAM-3)  
+- Full documentation suite (README, DESIGN, ROADMAP, CHANGELOG)  
+- GPU & CPU testing  
+- Repo cleanup and push  
+- v0.1 release readiness  
+
+**Next Week (Week 3):**  
+- Public launch tweet/blog  
+- COCO export (optional for v0.1.1)  
+- Early adopter outreach  

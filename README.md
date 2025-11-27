@@ -73,6 +73,8 @@ Example:
 
 ## SAM-3 Backend (GPU only)
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/msunbot/videomask/blob/main/examples/videomask_sam3_colab.ipynb)
+
 The `sam3` backend requires:
 - CUDA-enabled PyTorch
 - The `sam3` library installed (from the official repo)

@@ -27,7 +27,7 @@ import imageio.v2 as imageio
 # === CONFIG ===
 OUTPUT_DIR = "outputs/sam3_demo"  # folder created by your SAM-3 run
 FRAMES_DIR = os.path.join(OUTPUT_DIR, "frames_raw")
-MASKS_DIR = os.path.join(OUTPUT_DIR, "masks")
+MASKS_DIR = os.path.join(OUTPUT_DIR, "masks_raw")
 
 # If None, pick the middle frame
 FRAME_INDEX: Optional[int] = None

@@ -11,3 +11,7 @@ dependencies = [
 
 [project.scripts]
 videomask = "videomask.cli:main"
+conceptops = "conceptops.cli:main"
+
+[tool.setuptools]
+packages = ["videomask", "conceptops"]

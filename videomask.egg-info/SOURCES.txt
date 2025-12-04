@@ -1,5 +1,11 @@
+README.md
 pyproject.toml
+conceptops/__init__.py
+conceptops/cli.py
+tests/test_conceptops_phase1.py
+tests/test_sam3_mask_selection.py
 videomask/__init__.py
+videomask/cli.py
 videomask.egg-info/PKG-INFO
 videomask.egg-info/SOURCES.txt
 videomask.egg-info/dependency_links.txt

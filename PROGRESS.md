@@ -138,3 +138,71 @@
 - Public launch tweet/blog  
 - COCO export (optional for v0.1.1)  
 - Early adopter outreach  
+
+---
+## Week 3 (Days 11–20): ConceptOps MVP — Full Pipeline, Events, Concepts, Episode Export
+
+### Day 11–12 (Dec 5) — ConceptOps CLI Integration + Manifest Flow ✅
+- [x] Added unified `conceptops run` CLI: video → masks → events → concepts → episode  
+- [x] Added tuning flags (`--event-iou-threshold`, `--event-min-length`, `--labels`, `--concept-top-k`)  
+- [x] Integrated manifest-driven multi-stage pipeline (mask → event → concept → episode)  
+**Result:** One-command end-to-end ConceptOps pipeline
+
+---
+
+### Day 13–15 (Dec 5) — Temporal Event Segmentation (IoU + Motion Heuristics) ✅
+- [x] Implemented robust event segmentation (IoU + centroid + area motion)  
+- [x] Added fallback: always ≥ 1 event when masks exist  
+- [x] Implemented event normalization (contiguous event_ids: 0..N-1)  
+- [x] Added duplicate segment removal + min-length filtering  
+**Result:** Stable temporal event extraction suitable for MVP
+
+---
+
+### Day 16–17 (Dec 5) — CLIP Concept Tagging + Thumbnails + Uncertainty Scoring ✅
+- [x] Integrated CLIP concept tagging with customizable vocab  
+- [x] Added per-event thumbnails  
+- [x] Added `top_score` + `uncertain=True` flag for low-confidence cases  
+- [x] Linked concept stage into CLI + manifest updates  
+**Result:** Semantic labels + visual thumbnails for each event
+
+---
+
+### Day 18 (Dec 5) — LeRobot Episode Exporter + Manifest Flow 🎉  
+- [x] Implemented `episode.json` builder from frames, masks, events, concepts  
+- [x] Normalized relative paths for portability  
+- [x] Added episode stage to CLI + manifest updates  
+**Result:** Robot-ready structured episode export
+
+---
+
+### Day 19 (Dec 5) — SAM-3 GPU Integration in Colab + HF Auth + Runtime Fixes 🎉  
+- [x] Set up full SAM-3 backend in Colab (HF login, vocab fix, asset path fix)  
+- [x] Ran full ConceptOps pipeline with `backend=sam3`  
+- [x] Validated masks, IoUs, event splits, CLIP labels, thumbnails  
+**Result:** First real ConceptOps hero run (SAM-3 powered)
+
+---
+
+### Day 20 (Dec 5) — Visualization Notebook + Analysis Workflow 🎉  
+- [x] Built demo notebook for visual inspection  
+- [x] Added event overview, label summaries, thumbnails, flipbooks  
+- [x] Validated notebook workflow for hero clip  
+**Result:** Polished MVP demo tooling for README + launch
+
+---
+
+## Week 3 Summary
+**Completed:**  
+- Full ConceptOps MVP pipeline  
+- Event segmentation (IoU + centroid + area)  
+- CLIP concept tagging (thumbnails + uncertainty)  
+- LeRobot episode export  
+- SAM-3 GPU flow (Colab)  
+- Demo notebook (end-to-end visualization)
+
+**Next:**  
+- README upgrade + diagrams  
+- Add example video(s)  
+- Publish repo + tweet thread + demo notebook  
+- Optional: small UX polish pre-launch

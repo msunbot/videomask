@@ -9,6 +9,7 @@ from PIL import Image
 import clip
 
 THUMBNAIL_SIZE = (256, 256)
+MIN_TOP_SCORE = 0.25 # below this, label as 'uncertain'
 
 DEFAULT_LABELS = [
     "human hand",
@@ -169,6 +170,9 @@ def run_concept_stage(cfg: ConceptConfig) -> Path:
         top_k = min(cfg.top_k, len(indices))
         top_labels = [cfg.labels[i] for i in indices[:top_k]]
         top_scores = [float(p) for p in probs[:top_k]]
+
+        top_score = top_scores[0] if top_scores else 0.0
+        is_uncertain = top_score < MIN_TOP_SCORE
         thumb_path = _save_thumbnail(frame_path, thumbnails_dir, ev["event_id"])
 
         concepts.append(
@@ -178,6 +182,8 @@ def run_concept_stage(cfg: ConceptConfig) -> Path:
                 "thumbnail_path": str(thumb_path),
                 "labels": top_labels,
                 "scores": top_scores,
+                "top_score": top_score,
+                "uncertain": is_uncertain,
             }
         )
 

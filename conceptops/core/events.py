@@ -10,7 +10,8 @@ from PIL import Image
 
 DEFAULT_IOU_THRESHOLD = 0.90
 MIN_EVENT_LENGTH_FRAMES = 2
-
+CENTROID_MOVE_THRESHOLD = 0.08  # ~8% of frame width/height
+AREA_CHANGE_THRESHOLD = 0.10    # 10% relative area change
 
 @dataclass
 class EventConfig:
@@ -60,6 +61,19 @@ def _load_mask(mask_path: Path) -> np.ndarray:
     arr = np.array(img)
     return arr > 0  # bool mask
 
+def _mask_stats(mask: np.ndarray):
+    """
+    Compute normalized centroid (cx, cy) in [0,1] and area fraction in [0,1].
+    If mask is empty, return center + zero area.
+    """
+    ys, xs = np.nonzero(mask)
+    h, w = mask.shape
+    if len(xs) == 0:
+        return 0.5, 0.5, 0.0
+    cx = xs.mean() / float(w)
+    cy = ys.mean() / float(h)
+    area = len(xs) / float(h * w)
+    return float(cx), float(cy), float(area)
 
 def _mask_iou(a: np.ndarray, b: np.ndarray) -> float:
     """
@@ -84,25 +98,27 @@ def _build_events(
       - Always returns at least 1 event if there are masks.
       - Starts event 0 at frame 0.
       - For each frame t, compare IoU(mask[t-1], mask[t]).
-      - If IoU < threshold => close current event at t-1 and start new one at t.
+      - If IoU < threshold OR centroid/area change is large => close current event at t-1 and start new one at t.
       - After loop, close the final event at last frame.
       - Filter out very short events; if all are filtered, fall back to [0..N-1].
-
     """
     if not mask_paths:
         return []
 
+    # Precompute stats
     masks = [_load_mask(p) for p in mask_paths]
     n = len(masks)
+    stats = [_mask_stats(m) for m in masks]  # list of (cx, cy, area)
 
-    raw_events = []
+    raw_events: List[Dict] = []
     current_start = 0
+    event_id = 0
 
-    def make_event(start_idx: int, end_idx: int, event_id: int) -> Dict:
+    def make_event(start_idx: int, end_idx: int, eid: int) -> Dict:
         length = end_idx - start_idx + 1
         mid_idx = (start_idx + end_idx) // 2
         return {
-            "event_id": event_id,
+            "event_id": eid,
             "start_frame": start_idx,
             "end_frame": end_idx,
             "num_frames": length,
@@ -112,46 +128,53 @@ def _build_events(
             "key_frame_path": str(mask_paths[mid_idx]),
         }
 
-    # Build raw segments
-    event_id = 0
+    ious: List[float] = []
+
     for idx in range(1, n):
-        iou = _mask_iou(masks[idx - 1], masks[idx])
-        if iou < iou_threshold:
-            # close current event at idx-1
+        m_prev, m_curr = masks[idx - 1], masks[idx]
+        iou = _mask_iou(m_prev, m_curr)
+        ious.append(iou)
+
+        cx0, cy0, a0 = stats[idx - 1]
+        cx1, cy1, a1 = stats[idx]
+        dc = ((cx1 - cx0) ** 2 + (cy1 - cy0) ** 2) ** 0.5
+        da = abs(a1 - a0) / max(a0, a1, 1e-6)
+
+        significant_motion = (
+            iou < iou_threshold
+            or dc > CENTROID_MOVE_THRESHOLD
+            or da > AREA_CHANGE_THRESHOLD
+        )
+
+        if significant_motion:
             raw_events.append(make_event(current_start, idx - 1, event_id))
             event_id += 1
             current_start = idx
 
-    # close final event
     raw_events.append(make_event(current_start, n - 1, event_id))
 
-    ious = []
-    for idx in range(1, n):
-        iou = _mask_iou(masks[idx - 1], masks[idx])
-        ious.append(iou)
-        if iou < iou_threshold:
-            # existing logic...
-            raw_events.append(make_event(current_start, idx - 1, event_id))
-            event_id += 1
-            current_start = idx
-
-    # DEBUG: print IoU summary
-    print("[ConceptOps][DEBUG] IoUs between consecutive masks:")
-    print("  min:", float(min(ious)), "max:", float(max(ious)))
-    print("  first 10:", [round(float(x), 3) for x in ious[:10]])
+    print("[ConceptOps][DEBUG] IoUs:", [round(float(x), 3) for x in ious[:10]])
 
     # Filter by min_event_length
-    events = [
-        ev for ev in raw_events
-        if ev["num_frames"] >= min_event_length
-    ]
+    filtered = [ev for ev in raw_events if ev["num_frames"] >= min_event_length]
 
-    # Fallback: if everything got filtered out, keep one single full-length event
-    if not events:
-        events = [make_event(0, n - 1, 0)]
+    # Fallback: if everything got filtered out, keep a single full-length event
+    if not filtered:
+        filtered = [make_event(0, n - 1, 0)]
 
-    return events
+    # Normalize event IDs to 0..N-1 and remove duplicate (start,end) segments
+    unique: Dict[Tuple[int, int], Dict] = {}
+    for ev in filtered:
+        key = (ev["start_frame"], ev["end_frame"])
+        if key not in unique:
+            unique[key] = ev
 
+    normalized: List[Dict] = []
+    for new_id, ev in enumerate(sorted(unique.values(), key=lambda e: e["start_frame"])):
+        ev["event_id"] = new_id
+        normalized.append(ev)
+
+    return normalized
 
 def run_event_stage(cfg: EventConfig) -> Path:
     """

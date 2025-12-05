@@ -1,18 +1,19 @@
-import sys
 import argparse
+import sys
 from pathlib import Path
 import shutil
 
-from conceptops.pipelines.mask_pipeline import run_conceptops_mask_pipeline
 from conceptops.core.config import MaskPipelineConfig
+from conceptops.pipelines.mask_pipeline import run_conceptops_mask_pipeline
 from conceptops.core.events import EventConfig, run_event_stage
 from conceptops.core.concepts import ConceptConfig, run_concept_stage, DEFAULT_LABELS
 from conceptops.core.episode import EpisodeConfig, run_episode_stage
 
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="conceptops",
-        description="ConceptOps MVP: raw video → masks (via VideoMask). Phase 0 stub.",
+        description="ConceptOps MVP: video → masks → events → concepts → episode.",
     )
     parser.add_argument(
         "video",
@@ -50,6 +51,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=30,
         help="Optional frame cap for quick runs.",
     )
+
+    # Event tuning
     parser.add_argument(
         "--event-iou-threshold",
         type=float,
@@ -62,6 +65,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=2,
         help="Minimum number of frames per event (default: 2).",
     )
+
+    # CLIP tuning
     parser.add_argument(
         "--labels",
         nargs="*",
@@ -74,11 +79,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=3,
         help="Number of top CLIP concepts to keep per event (default: 3).",
     )
+
     return parser
 
 
 def main() -> None:
     parser = build_arg_parser()
+
     # Allow: `conceptops run input.mp4 --out outdir/ ...`
     argv = sys.argv[1:]
     if argv and argv[0] == "run":
@@ -101,7 +108,7 @@ def main() -> None:
 
     cfg.out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Stage 1: masks
+    # Stage 1: masks (+ manifest)
     run_conceptops_mask_pipeline(
         video_path=cfg.video_path,
         out_dir=cfg.out_dir,
@@ -110,18 +117,16 @@ def main() -> None:
         resize=cfg.resize,
         max_frames=cfg.max_frames,
     )
-
     print("[ConceptOps] Phase 1 complete: frames + masks generated via VideoMask.")
 
-    # Stage 2: events (using defaults for now)
+    # Stage 2: events
     print("[ConceptOps] Phase 2: temporal events (IoU-based).")
     event_cfg = EventConfig(
         out_dir=cfg.out_dir,
         iou_threshold=args.event_iou_threshold,
         min_event_length=args.event_min_length,
     )
-
-    print("[ConceptOps] Masks + events ready. Next: concepts → LeRobot episodes.")
+    run_event_stage(event_cfg)
 
     # Stage 3: concepts (CLIP)
     print("[ConceptOps] Phase 3: CLIP concept tagging.")
@@ -131,17 +136,14 @@ def main() -> None:
         labels=labels,
         top_k=args.concept_top_k,
     )
+    run_concept_stage(concept_cfg)
 
-    print("[ConceptOps] Masks + events + concepts ready. Next: LeRobot episodes.")
-
-    # Stage 4: LeRobot-style episode JSON
+    # Stage 4: episode JSON
     print("[ConceptOps] Phase 4: building episode JSON.")
     episode_cfg = EpisodeConfig(out_dir=cfg.out_dir, episode_id=0)
     run_episode_stage(episode_cfg)
 
-    print("[ConceptOps] Full pipeline complete: video → masks → events → concepts → episode.")
-
-    # Optional: copy demo notebook template into run folder
+    # Copy demo notebook template into run folder, if present
     template_nb = Path(__file__).resolve().parent / "demos" / "ConceptOps_Demo_Template.ipynb"
     target_nb = cfg.out_dir / "demo.ipynb"
     if template_nb.exists():
@@ -152,6 +154,7 @@ def main() -> None:
               "Create conceptops/demos/ConceptOps_Demo_Template.ipynb to enable this.")
 
     print("[ConceptOps] Full pipeline complete: video → masks → events → concepts → episode.")
+
 
 if __name__ == "__main__":
     main()

@@ -54,6 +54,38 @@ def run_conceptops_mask_pipeline(
     }
 
     manifest_path = out_dir / "conceptops_manifest.json"
+
+    # If a manifest exists, load and update it instead of nuking stages.
+    if manifest_path.exists():
+        with manifest_path.open("r", encoding="utf-8") as f:
+            manifest = json.load(f)
+    else:
+        manifest = {}
+
+    manifest.update(
+        {
+            "version": "0.1.0",
+            "created_at": datetime.utcnow().isoformat() + "Z",
+            "video_path": str(video_path),
+            "video_mask_output_dir": str(vm_out_dir),
+            "frames_dir": str(vm_out_dir / "frames_raw"),
+            "masks_dir": str(vm_out_dir / "masks"),
+            "metadata_path": str(vm_out_dir / "metadata.json"),
+            "backend": backend,
+            "fps": fps,
+            "resize": resize,
+            "max_frames": max_frames,
+        }
+    )
+
+    # Only set default stage states if they are not already completed
+    stages = manifest.get("stages", {})
+    stages.setdefault("masks", "completed")
+    stages.setdefault("events", "pending")
+    stages.setdefault("concepts", "pending")
+    stages.setdefault("lerobot_episode", "pending")
+    manifest["stages"] = stages
+
     with manifest_path.open("w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
 

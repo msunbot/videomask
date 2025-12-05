@@ -125,6 +125,21 @@ def _build_events(
     # close final event
     raw_events.append(make_event(current_start, n - 1, event_id))
 
+    ious = []
+    for idx in range(1, n):
+        iou = _mask_iou(masks[idx - 1], masks[idx])
+        ious.append(iou)
+        if iou < iou_threshold:
+            # existing logic...
+            raw_events.append(make_event(current_start, idx - 1, event_id))
+            event_id += 1
+            current_start = idx
+
+    # DEBUG: print IoU summary
+    print("[ConceptOps][DEBUG] IoUs between consecutive masks:")
+    print("  min:", float(min(ious)), "max:", float(max(ious)))
+    print("  first 10:", [round(float(x), 3) for x in ious[:10]])
+
     # Filter by min_event_length
     events = [
         ev for ev in raw_events

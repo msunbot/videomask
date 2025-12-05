@@ -72,7 +72,6 @@ def _mask_iou(a: np.ndarray, b: np.ndarray) -> float:
         return 1.0
     return float(intersection) / float(union)
 
-
 def _build_events(
     mask_paths: List[Path],
     fps: float,
@@ -80,52 +79,62 @@ def _build_events(
     min_event_length: int,
 ) -> List[Dict]:
     """
-    Very simple 1D temporal segmentation:
-      - Load masks for each frame.
-      - Start with event 0 at frame 0.
+    Robust temporal segmentation:
+
+      - Always returns at least 1 event if there are masks.
+      - Starts event 0 at frame 0.
       - For each frame t, compare IoU(mask[t-1], mask[t]).
-      - If IoU < threshold => start new event at t.
-      - Discard events shorter than min_event_length frames.
+      - If IoU < threshold => close current event at t-1 and start new one at t.
+      - After loop, close the final event at last frame.
+      - Filter out very short events; if all are filtered, fall back to [0..N-1].
+
     """
     if not mask_paths:
         return []
 
     masks = [_load_mask(p) for p in mask_paths]
+    n = len(masks)
 
-    events: List[Dict] = []
+    raw_events = []
     current_start = 0
-    event_id = 0
 
-    def flush_event(start_idx: int, end_idx: int, eid: int) -> None:
-        nonlocal events
+    def make_event(start_idx: int, end_idx: int, event_id: int) -> Dict:
         length = end_idx - start_idx + 1
-        if length < min_event_length:
-            return
         mid_idx = (start_idx + end_idx) // 2
-        events.append(
-            {
-                "event_id": eid,
-                "start_frame": start_idx,
-                "end_frame": end_idx,
-                "num_frames": length,
-                "start_time_sec": start_idx / fps,
-                "end_time_sec": (end_idx + 1) / fps,
-                "key_frame_index": mid_idx,
-                "key_frame_path": str(mask_paths[mid_idx]),
-            }
-        )
+        return {
+            "event_id": event_id,
+            "start_frame": start_idx,
+            "end_frame": end_idx,
+            "num_frames": length,
+            "start_time_sec": start_idx / fps,
+            "end_time_sec": (end_idx + 1) / fps,
+            "key_frame_index": mid_idx,
+            "key_frame_path": str(mask_paths[mid_idx]),
+        }
 
-    for idx in range(1, len(masks)):
+    # Build raw segments
+    event_id = 0
+    for idx in range(1, n):
         iou = _mask_iou(masks[idx - 1], masks[idx])
-
         if iou < iou_threshold:
-            # End current event at idx-1
-            flush_event(current_start, idx - 1, event_id)
+            # close current event at idx-1
+            raw_events.append(make_event(current_start, idx - 1, event_id))
             event_id += 1
             current_start = idx
 
-    # Flush last event
-    flush_event(current_start, len(masks) - 1, event_id)
+    # close final event
+    raw_events.append(make_event(current_start, n - 1, event_id))
+
+    # Filter by min_event_length
+    events = [
+        ev for ev in raw_events
+        if ev["num_frames"] >= min_event_length
+    ]
+
+    # Fallback: if everything got filtered out, keep one single full-length event
+    if not events:
+        events = [make_event(0, n - 1, 0)]
+
     return events
 
 

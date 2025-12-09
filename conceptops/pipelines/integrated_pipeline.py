@@ -140,6 +140,12 @@ def process_video_to_dataset(
             base_label=e2r_config.get("base_label", "move"),
         )
         detector = MotionEventDetector(config=motion_cfg)
+        event_config = {
+            "mode": "motion",
+            "threshold_multiplier": motion_cfg.threshold_multiplier,
+            "min_event_length": motion_cfg.min_event_length,
+            "base_label": motion_cfg.base_label,
+        }
     else:
         frames_per_event = int(e2r_config.get("frames_per_event", 16))
         base_label = e2r_config.get("base_label", "segment")
@@ -149,6 +155,11 @@ def process_video_to_dataset(
                 base_label=base_label,
             )
         )
+        event_config = {
+            "mode": "fixed",
+            "frames_per_event": frames_per_event,
+            "base_label": base_label,
+        }
 
     events = detector.detect(frame_records)
 
@@ -159,13 +170,9 @@ def process_video_to_dataset(
         events=events,
         extra={
             "videomask_metadata": vm_metadata,
-            "event_config": {
-                "frames_per_event": frames_per_event,
-                "base_label": base_label,
-            },
+            "event_config": event_config,
         },
     )
-
     episode_path = out_dir_path / "episode.json"
     episode_path.write_text(episode.to_json(indent=2), encoding="utf-8")
 

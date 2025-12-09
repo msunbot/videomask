@@ -8,7 +8,12 @@ from typing import Any, Dict, Optional, List
 
 from conceptops.ingestion.video_ingest import ingest_video
 from conceptops.types import FrameRecord, Episode
-from conceptops.core.events import SimpleEventDetector, SimpleEventConfig
+from conceptops.core.events import (
+    SimpleEventDetector,
+    SimpleEventConfig,
+    MotionEventDetector,
+    MotionEventConfig,
+)
 from videomask.pipeline.segmenter import VideoSegmenter
 
 
@@ -125,15 +130,26 @@ def process_video_to_dataset(
         extraction_fps=ingest_result.metadata.extraction_fps,
     )
 
-    # 5) Run simple event detector (v0.5)
-    frames_per_event = int(e2r_config.get("frames_per_event", 16))
-    base_label = e2r_config.get("base_label", "segment")
-    detector = SimpleEventDetector(
-        config=SimpleEventConfig(
-            frames_per_event=frames_per_event,
-            base_label=base_label,
+    # 5) Run event detector (v0.5)
+    mode = e2r_config.get("mode", "fixed")  # "fixed" or "motion"
+
+    if mode == "motion":
+        motion_cfg = MotionEventConfig(
+            threshold_multiplier=float(e2r_config.get("threshold_multiplier", 2.0)),
+            min_event_length=int(e2r_config.get("min_event_length", 3)),
+            base_label=e2r_config.get("base_label", "move"),
         )
-    )
+        detector = MotionEventDetector(config=motion_cfg)
+    else:
+        frames_per_event = int(e2r_config.get("frames_per_event", 16))
+        base_label = e2r_config.get("base_label", "segment")
+        detector = SimpleEventDetector(
+            config=SimpleEventConfig(
+                frames_per_event=frames_per_event,
+                base_label=base_label,
+            )
+        )
+
     events = detector.detect(frame_records)
 
     episode = Episode(

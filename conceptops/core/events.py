@@ -1,6 +1,12 @@
+from __future__ import annotations
+
 import argparse
 import json
 from dataclasses import dataclass
+from typing import List, Optional
+
+from conceptops.types import FrameRecord, EventRecord
+
 from pathlib import Path
 from typing import List, Dict
 
@@ -27,6 +33,76 @@ class EventConfig:
             min_event_length=int(args.min_event_length),
         )
 
+class SimpleEventConfig:
+    """
+    Configuration for the simple v0.5 event detector.
+
+    This is deliberately minimal and deterministic:
+      - We segment frames into fixed windows of N frames.
+      - Each window becomes an EventRecord with a generic label.
+
+    Later, you'll replace this with Ego2Robot's model-based logic,
+    but keep the same public interface so the pipeline doesn't break.
+    """
+    frames_per_event: int = 16   # e.g. ~0.5s at 30fps, ~2s at 8fps
+    base_label: str = "segment"  # generic label prefix
+
+
+class SimpleEventDetector:
+    """
+    v0.5 "toy" event detector.
+
+    For now it just groups consecutive frames into fixed-length segments.
+    This gives you:
+      - A concrete EventRecord schema in episode.json.
+      - A clean interface where a more advanced Ego2Robot detector
+        can be dropped in later.
+
+    Usage:
+        detector = SimpleEventDetector(config=SimpleEventConfig(frames_per_event=8))
+        events = detector.detect(frame_records)
+    """
+
+    def __init__(self, config: Optional[SimpleEventConfig] = None) -> None:
+        self.config = config or SimpleEventConfig()
+
+    def detect(self, frames: List[FrameRecord]) -> List[EventRecord]:
+        """
+        Segment the list of FrameRecord objects into fixed-size windows.
+
+        Args:
+            frames: Ordered list of FrameRecord objects (as built in the pipeline).
+
+        Returns:
+            List[EventRecord] with monotonically increasing event_id.
+        """
+        events: List[EventRecord] = []
+        n = len(frames)
+        if n == 0:
+            return events
+
+        k = self.config.frames_per_event
+        event_id = 0
+
+        for start in range(0, n, k):
+            end = min(start + k - 1, n - 1)  # inclusive end index
+            label = f"{self.config.base_label}_{event_id}"
+
+            events.append(
+                EventRecord(
+                    event_id=event_id,
+                    label=label,
+                    start_frame=start,
+                    end_frame=end,
+                    score=None,         # no meaningful score yet
+                    metadata={
+                        "frames_per_event": k,
+                    },
+                )
+            )
+            event_id += 1
+
+        return events
 
 def _load_manifest(out_dir: Path) -> Dict:
     manifest_path = out_dir / "conceptops_manifest.json"

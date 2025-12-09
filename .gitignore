@@ -14,3 +14,5 @@ __pycache__/
 outputs/
 
 ROADMAP.md
+
+*.egg-info/

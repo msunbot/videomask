@@ -1,129 +1,307 @@
-# VideoMask SDK
+# VideoMask SDK & ConceptOps
 
-VideoMask is a Python-first SDK that turns raw videos into segmentation-ready datasets.
+VideoMask is a Python-first SDK that turns raw videos into segmentation-ready datasets.  
+ConceptOps is a higher-level pipeline built on top of VideoMask that turns **video → masks → temporal events → semantic concepts → LeRobot-style episode JSON**.
 
-Core features (v0.1):
-- Frame extraction via ffmpeg
-- Pluggable segmentation backends (dummy, SAM-3)
-- Lightweight temporal smoothing
-- Simple folder-format export (frames, masks, metadata)
-- CLI and Python API
+---
 
-## Installation
+## Part 1 – VideoMask SDK (v0.1)
 
-1. Clone the repository:
+Core features:
+- Frame extraction via ffmpeg  
+- Pluggable segmentation backends (`dummy`, `sam3`)  
+- Lightweight temporal smoothing  
+- Folder-format export (frames, masks, metadata)  
+- CLI + Python API  
 
-   git clone https://github.com/yourname/videomask.git  
-   cd videomask
+### Installation
 
-2. Create and activate a virtual environment (example using venv):
+1. Clone the repo:  
+   git clone https://github.com/msunbot/videomask.git  
+   cd videomask  
 
+2. Create venv:  
    python -m venv .venv  
-   source .venv/bin/activate
+   source .venv/bin/activate  
 
-3. Install the package in editable mode:
+3. Install package:  
+   pip install -e .  
 
-   pip install -e .
+4. Install ffmpeg (macOS):  
+   brew install ffmpeg  
 
-4. Install ffmpeg (example for macOS with Homebrew):
+### Quickstart (dummy backend, CPU)
 
-   brew install ffmpeg
+Python example:
 
-## Quickstart (dummy backend, CPU)
+    from videomask.pipeline.segmenter import VideoSegmenter
+    seg = VideoSegmenter(backend="dummy", fps=2, resize=512, max_frames=30)
+    seg.run("path/to/video.mp4", out_dir="outputs/basic_example")
 
-Minimal Python usage:
+CLI example:
 
-- Import:
+    videomask segment path/to/video.mp4 --out outputs/run1 --backend dummy
 
-  from videomask.pipeline.segmenter import VideoSegmenter
+### SAM-3 Backend (GPU)
 
-- Use:
+Requires: CUDA PyTorch, SAM-3 library, Hugging Face token.
 
-  seg = VideoSegmenter(  
-      backend="dummy",  
-      fps=2,  
-      resize=512,  
-      max_frames=30,  
-  )  
+High-level steps (e.g. in Colab):
+- Switch to GPU runtime  
+- Install torch + sam3  
+- Login to Hugging Face  
+- Run:
 
-  seg.run("path/to/video.mp4", out_dir="outputs/basic_example")
+    videomask segment path/to/video.mp4 --out outputs/sam3_run --backend sam3 --fps 1 --resize 512
 
-Result:
-- frames saved under `outputs/basic_example/frames_raw/`  
-- masks saved under `outputs/basic_example/masks/`  
-- metadata stored in `outputs/basic_example/metadata.json`
+### VideoMask Output Format
 
-## CLI Usage
+`out_dir` contains:
+- frames_raw/   (RGB frames)  
+- masks/        (binary masks)  
+- metadata.json  
 
-From the project root (after installation):
+---
 
-- Dummy backend:
+## Part 2 – ConceptOps MVP (video → events → concepts → episode)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](
+https://colab.research.google.com/github/msunbot/videomask/blob/main/conceptops/demos/ConceptOps_Demo_Template.ipynb
+)
 
-  videomask segment path/to/video.mp4 --out outputs/run1 --backend dummy
+ConceptOps extends VideoMask as:
 
-Key options:
-- `--backend` (default: `dummy`)
-- `--fps` (frames per second)
-- `--resize` (shorter side in pixels, 0 to keep original)
-- `--max-frames` (optional limit for quick tests)
+    raw video
+      → frames + masks (SAM-3 or dummy)
+      → temporal events (IoU + centroid + area heuristics)
+      → CLIP concepts (semantic labels + uncertainty)
+      → episode.json (LeRobot-style)
 
-Example:
+### What ConceptOps produces
 
-  videomask segment path/to/video.mp4 --out outputs/run2 --backend dummy --fps 1 --resize 256
+Given an input video, ConceptOps creates:
+- frames_raw/  
+- masks/  
+- metadata.json  
+- conceptops_manifest.json  
+- events.json  
+- concepts.json  
+- thumbnails/  
+- episode.json  
+- demo.ipynb  (copy of visualization template, if present)
 
-## SAM-3 Backend (GPU only)
+### ConceptOps CLI (single command)
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/msunbot/videomask/blob/main/examples/videomask_sam3_colab.ipynb)
+    conceptops run <video_path> \
+      --out <out_dir> \
+      --backend {dummy,sam3} \
+      --fps 2 \
+      --resize 320 \
+      --max-frames 40 \
+      --event-iou-threshold 0.7 \
+      --event-min-length 3 \
+      --labels label1 label2 ... \
+      --concept-top-k 3
 
-The `sam3` backend requires:
-- CUDA-enabled PyTorch
-- The `sam3` library installed (from the official repo)
-- A Hugging Face token with access to SAM-3
+---
 
-Typical setup (high-level):
-1. Use a GPU environment (Colab or remote VM).
-2. Install CUDA PyTorch (e.g. torch 2.4.1 with cu121 wheels).
-3. Clone and install SAM-3 from the facebookresearch GitHub repo.
-4. Log in to Hugging Face using `huggingface-cli login`.
+## Quickstart – Local CPU (dummy backend) with desk_demo.mp4
 
-Then, run:
+Assuming you have a small demo clip at `examples/desk_demo.mp4`:
 
-- Python example (in a GPU environment):
+    conceptops run examples/desk_demo.mp4 \
+      --out outputs/desk_demo_dummy \
+      --backend dummy \
+      --fps 2 \
+      --resize 320 \
+      --max-frames 40 \
+      --event-iou-threshold 0.7 \
+      --event-min-length 3 \
+      --labels laptop keyboard monitor mouse "coffee mug" phone notebook
 
-  from videomask.pipeline.segmenter import VideoSegmenter  
+This will create:
 
-  seg = VideoSegmenter(  
-      backend="sam3",  
-      fps=1,  
-      resize=512,  
-      max_frames=20,  
-      backend_kwargs={  
-          "device": "cuda",  
-          "text_prompt": "person"  
-      },  
-  )  
+    outputs/desk_demo_dummy/
+      frames_raw/
+      masks/
+      metadata.json
+      conceptops_manifest.json
+      events.json
+      concepts.json
+      thumbnails/
+      episode.json
+      demo.ipynb    (if ConceptOps_Demo_Template.ipynb exists in conceptops/demos)
 
-  seg.run("path/to/video.mp4", out_dir="outputs/sam3_example")
+You can then open `outputs/desk_demo_dummy/demo.ipynb` or the template notebook and set:
 
-- CLI example (GPU environment):
+    RUN_DIR = Path("outputs/desk_demo_dummy")
 
-  videomask segment path/to/video.mp4 --out outputs/sam3_run --backend sam3 --fps 1 --resize 512
+to visualize events and labels.
 
-## Output Format
+---
 
-Folder export (v0.1):
+## Quickstart – GPU (SAM-3 in Colab)
 
-- `out_dir/frames_raw/`  
-  - Extracted RGB frames as images
+In a Colab notebook:
 
-- `out_dir/masks/`  
-  - Binary masks as PNG (0 or 255 intensity)
+    !git clone https://github.com/msunbot/videomask.git
+    %cd videomask
+    !pip install -e .
+    !pip install git+https://github.com/openai/CLIP.git matplotlib huggingface_hub
 
-- `out_dir/metadata.json`  
-  - Lists of frame paths, mask paths, and run configuration
+Login to Hugging Face:
+
+    from huggingface_hub import login
+    login()  # paste token
+
+Fix SAM-3 BPE vocab (expected path):
+
+    !mkdir -p /usr/local/lib/python3.12/dist-packages/assets
+    !wget -q \
+      https://raw.githubusercontent.com/openai/CLIP/main/clip/bpe_simple_vocab_16e6.txt.gz \
+      -O /usr/local/lib/python3.12/dist-packages/assets/bpe_simple_vocab_16e6.txt.gz
+
+Upload a test video to `data/` (e.g. `hero_sam3.mp4`), then run:
+
+    conceptops run data/hero_sam3.mp4 \
+      --out outputs/hero_sam3 \
+      --backend sam3 \
+      --fps 2 \
+      --resize 320 \
+      --max-frames 40 \
+      --event-iou-threshold 0.7 \
+      --event-min-length 3 \
+      --labels "human hand" "person" "robot arm" "box" "drawer" "cup" "bottle" "tool" "table" "keyboard" "monitor"
+
+Then open the demo notebook template:
+
+- `conceptops/demos/ConceptOps_Demo_Template.ipynb`
+
+Set:
+
+    RUN_DIR = Path("outputs/hero_sam3")
+
+and run all cells to view:
+- stage status  
+- event summary  
+- thumbnails with CLIP labels  
+- flipbook of frames per event  
+
+---
+
+## ConceptOps Output Files
+
+**events.json**  
+Each event has frame range + timestamps, for example:
+
+    {
+      "event_id": 0,
+      "start_frame": 2,
+      "end_frame": 4,
+      "num_frames": 3,
+      "start_time_sec": 1.0,
+      "end_time_sec": 2.5,
+      "key_frame_index": 3,
+      "key_frame_path": "outputs/.../masks/mask_000004.jpg"
+    }
+
+**concepts.json**  
+CLIP labels and scores per event, plus uncertainty flag:
+
+    {
+      "event_id": 0,
+      "frame_path": "outputs/.../frames_raw/frame_000004.jpg",
+      "thumbnail_path": "outputs/.../thumbnails/event_0000.jpg",
+      "labels": ["laptop", "keyboard", "coffee mug"],
+      "scores": [0.42, 0.31, 0.12],
+      "top_score": 0.42,
+      "uncertain": false
+    }
+
+**episode.json**  
+Combined LeRobot-style payload containing:
+- fps and path metadata  
+- observations (image + segmentation mask paths)  
+- events (from events.json)  
+- events_concepts (from concepts.json)  
+- metadata (backend info, labels_vocab, thumbnails_dir)
+
+---
+
+## Example Video
+
+A small desk demo clip (`examples/desk_demo.mp4`) is recommended for local testing.
+
+To run:
+
+    conceptops run examples/desk_demo.mp4 \
+      --out outputs/desk_demo_dummy \
+      --backend dummy
+
+---
+## Architecture Diagram
++------------------+
+|   Input Video    |
++------------------+
+          |
+          v
++------------------+
+|  Frame Extractor |
+|  (ffmpeg)        |
++------------------+
+          |
+          v
++---------------------------+
+|  Segmentation Backend     |
+|  (SAM-3 or Dummy)         |
++---------------------------+
+          |
+          v
++-----------------------------+
+|  frames_raw/  masks/       |
+|  metadata.json             |
++-----------------------------+
+          |
+          v
++-------------------------------+
+|   Event Segmenter             |
+|   (IoU + centroid + area)     |
++-------------------------------+
+          |
+          v
++----------------------+
+|     events.json      |
++----------------------+
+          |
+          v
++------------------------------+
+|        CLIP Tagger           |
+|   (top-k labels + uncertain) |
++------------------------------+
+          |
+          v
++----------------------+
+|   concepts.json      |
+|   thumbnails/        |
++----------------------+
+          |
+          v
++-----------------------------+
+|     Episode Builder         |
+|     (LeRobot-style JSON)    |
++-----------------------------+
+          |
+          v
++----------------------+
+|     episode.json     |
++----------------------+
+
+---
 
 ## Roadmap
 
-See `ROADMAP.md` for:
-- v0.2 plans (COCO export, mask strategies, additional backends)
-- ConceptOps direction (concept-centric segmentation and datasets)
+Planned:
+- Additional segmentation backends  
+- Richer event heuristics  
+- Domain-specific CLIP vocabularies  
+- Additional episode formats (downstream)  
+- Notebook and visualization improvements  

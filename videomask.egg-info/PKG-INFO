@@ -1,8 +1,0 @@
-Metadata-Version: 2.4
-Name: videomask
-Version: 0.0.1
-Summary: Programmatic video segmentation datasets (SAM-3 ready)
-Requires-Python: >=3.10
-Requires-Dist: numpy
-Requires-Dist: Pillow
-Requires-Dist: click

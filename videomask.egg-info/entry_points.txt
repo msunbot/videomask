@@ -1,3 +1,0 @@
-[console_scripts]
-conceptops = conceptops.cli:main
-videomask = videomask.cli:main

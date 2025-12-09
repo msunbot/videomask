@@ -32,7 +32,7 @@ class EventConfig:
             iou_threshold=float(args.iou_threshold),
             min_event_length=int(args.min_event_length),
         )
-
+@dataclass
 class SimpleEventConfig:
     """
     Configuration for the simple v0.5 event detector.
@@ -47,7 +47,7 @@ class SimpleEventConfig:
     frames_per_event: int = 16   # e.g. ~0.5s at 30fps, ~2s at 8fps
     base_label: str = "segment"  # generic label prefix
 
-
+@dataclass
 class SimpleEventDetector:
     """
     v0.5 "toy" event detector.
@@ -101,6 +101,145 @@ class SimpleEventDetector:
                 )
             )
             event_id += 1
+
+        return events
+
+@dataclass
+class MotionEventConfig:
+    """
+    Configuration for the motion-based event detector.
+
+    We compute a simple per-frame motion magnitude (mean absolute pixel
+    difference vs previous frame), then segment contiguous high-motion
+    regions into events.
+    """
+    threshold_multiplier: float = 2.0   # how far above median to treat as "active"
+    min_event_length: int = 3          # min number of frames per event
+    base_label: str = "move"           # label prefix for motion events
+
+
+class MotionEventDetector:
+    """
+    Motion-based event detector v0.5.
+
+    This is still heuristic, but more meaningful than fixed windows:
+
+      - It loads frames and computes per-frame motion magnitude.
+      - Frames with unusually high motion are marked as "active".
+      - Contiguous active regions become EventRecord segments.
+
+    Later you can replace/augment the motion score with Ego2Robot
+    features, but keep the same `detect(frames) -> List[EventRecord]`
+    interface.
+    """
+
+    def __init__(self, config: Optional[MotionEventConfig] = None) -> None:
+        self.config = config or MotionEventConfig()
+
+    def _compute_motion_series(self, frames: List[FrameRecord]) -> List[float]:
+        """
+        Compute a motion magnitude per frame (starting from index 1).
+
+        motion[i] is the mean absolute grayscale difference between
+        frame i and frame i-1. For frame 0, we define motion[0] = 0.0.
+        """
+        n = len(frames)
+        if n == 0:
+            return []
+
+        motion = [0.0] * n  # frame 0 has zero by definition
+
+        prev_img = self._load_gray(frames[0].image_path)
+
+        for i in range(1, n):
+            curr_img = self._load_gray(frames[i].image_path)
+            # mean absolute difference as a scalar motion metric
+            diff = np.abs(curr_img.astype(np.float32) - prev_img.astype(np.float32))
+            motion[i] = float(diff.mean())
+            prev_img = curr_img
+
+        return motion
+
+    @staticmethod
+    def _load_gray(path: str) -> np.ndarray:
+        """
+        Load an image from disk and convert to a grayscale numpy array.
+        """
+        img = Image.open(path).convert("L")  # "L" = 8-bit grayscale
+        return np.array(img)
+
+    def detect(self, frames: List[FrameRecord]) -> List[EventRecord]:
+        """
+        Detect motion-based events from a list of FrameRecord.
+
+        Returns:
+            List[EventRecord] with event_id, label, start/end frames, score, metadata.
+        """
+        events: List[EventRecord] = []
+        n = len(frames)
+        if n == 0:
+            return events
+
+        motion = self._compute_motion_series(frames)
+
+        # Compute a data-driven threshold based on the median motion.
+        median_motion = float(np.median(motion)) if motion else 0.0
+        threshold = median_motion * self.config.threshold_multiplier
+
+        # Mark frames as "active" if motion >= threshold.
+        active = [m >= threshold for m in motion]
+
+        # Group contiguous active spans into events.
+        event_id = 0
+        i = 0
+        while i < n:
+            if not active[i]:
+                i += 1
+                continue
+
+            # Found the start of an active run.
+            start = i
+            while i + 1 < n and active[i + 1]:
+                i += 1
+            end = i  # inclusive
+
+            length = end - start + 1
+            if length >= self.config.min_event_length:
+                events.append(
+                    EventRecord(
+                        event_id=event_id,
+                        label=f"{self.config.base_label}_{event_id}",
+                        start_frame=start,
+                        end_frame=end,
+                        score=None,  # could store avg motion here later
+                        metadata={
+                            "threshold": threshold,
+                            "median_motion": median_motion,
+                            "min_event_length": self.config.min_event_length,
+                        },
+                    )
+                )
+                event_id += 1
+
+            i += 1
+
+        # Fallback: if we saw frames but no events, create one full-span event.
+        if not events and n > 0:
+            events.append(
+                EventRecord(
+                    event_id=0,
+                    label=f"{self.config.base_label}_0",
+                    start_frame=0,
+                    end_frame=n - 1,
+                    score=None,
+                    metadata={
+                        "fallback": True,
+                        "threshold": threshold,
+                        "median_motion": median_motion,
+                        "min_event_length": self.config.min_event_length,
+                    },
+                )
+            )
 
         return events
 

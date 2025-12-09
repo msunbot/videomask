@@ -1,5 +1,6 @@
 from pathlib import Path
 from conceptops.pipelines.integrated_pipeline import process_video_to_dataset
+import json
 
 def get_example_video(name: str) -> Path:
     return (Path(__file__).parent.parent / "examples" / name).resolve()

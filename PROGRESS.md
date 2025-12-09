@@ -206,3 +206,84 @@
 - Add example video(s)  
 - Publish repo + tweet thread + demo notebook  
 - Optional: small UX polish pre-launch
+
+## Week 4 (Days 21–23): Phase 2 Integrated Pipeline (ConceptOps + VideoMask + Ego2Robot v0.5)
+
+### Day 21 (Dec 9) — Ingestion Module + Integrated Entry Point ✅
+- [x] Designed 4-layer architecture for Phase 2:
+      1) Ingestion, 2) Perception (VideoMask), 3) Events (Ego2Robot),
+      4) Orchestration & Export (ConceptOps).
+- [x] Implemented `conceptops.ingestion.ingest_video()`:
+      - ffprobe-based metadata probing
+      - ffmpeg frame extraction → `frames_raw/`
+      - returns `VideoIngestResult` (frame paths + canonical `VideoMetadata`)
+- [x] Added `process_video_to_dataset(...)` orchestration entrypoint:
+      - video path + out_dir → ingestion + VideoMask run
+      - writes `frames_raw/`, `masks/`, `metadata.json`
+- [x] Created initial pytest for ingestion + integrated pipeline
+**Result:** Clean Layer 1 + Layer 4 integration with a single Python entrypoint.
+
+---
+
+### Day 22 (Dec 9) — Canonical Episode Schema + JSON Export ✅
+- [x] Added `conceptops/types.py` with core dataclasses:
+      - `VideoMetadata`, `FrameRecord`, `EventRecord`, `Episode`
+- [x] Refactored ingestion to use shared `VideoMetadata`
+- [x] Extended `process_video_to_dataset(...)` to:
+      - read VideoMask `metadata.json`
+      - build `FrameRecord` list (frame + mask + timestamps)
+      - construct `Episode` and write `episode.json`
+- [x] Implemented `Episode.to_dict()` / `Episode.to_json()` helpers
+- [x] Updated tests to assert existence + basic structure of `episode.json`
+**Result:** End-to-end `video → masks → episode.json` pipeline using canonical schemas.
+
+---
+
+### Day 23 (Dec 9) — Event Detectors + Episode Round-Trip + Export Hooks ✅
+- [x] Implemented `SimpleEventDetector` (fixed-window segmentation) with `SimpleEventConfig`
+- [x] Implemented `MotionEventDetector` (mean pixel diff–based motion) with `MotionEventConfig`
+- [x] Wired event detectors into `process_video_to_dataset(...)` via `e2r_config`:
+      - `mode="fixed"` → windowed segments
+      - `mode="motion"` → motion-based segments
+- [x] Added `Episode.from_dict()` / `Episode.from_json()` for round-trip loading
+- [x] Wrote round-trip tests:
+      - in-memory Episode → JSON → Episode
+      - pipeline `episode.json` → `Episode.from_json`
+- [x] Added LeRobot export surface (`episode_to_lerobot(...)`) for future RLDS integration
+- [x] Confirmed:
+      - `pytest` passes for ingestion + pipeline + round-trip tests
+      - `scripts/run_integrated_pipeline.py` produces episodes with frames + events
+**Result:** Phase 2 v0.5 integrated pipeline:
+`video → frames → masks → events → Episode (JSON)` with loaders, tests, and an export hook.
+
+---
+
+## Next (Week 4 + Phase 3 Start)
+
+**Week 4 — Perception Layer Polish (VideoMask)**  
+- [ ] Temporal mask smoothing improvements (reduce flicker across frames)  
+- [ ] Multi-object mask prototype:
+      - multiple instances per frame
+      - initial heuristics for object selection  
+- [ ] Stable object IDs across frames:
+      - simple IoU/centroid tracking over time  
+- [ ] Basic mask quality metrics:
+      - per-frame mask area / coverage
+      - simple confidence heuristics for filtering bad masks  
+
+**Phase 3 (first half) — Stronger Semantics & Multi-Object Support**  
+- [ ] Upgrade segmentation backends:
+      - plug in real SAM-3 / EfficientSAM / HQ-SAM under a common interface  
+- [ ] Extend `FrameRecord` / Episode schema for multi-object:
+      - support list of instance masks / IDs per frame  
+- [ ] Improve event semantics:
+      - refine motion-based detector with mask-aware features
+      - prepare path toward primitive events (reach, grasp, move, place) via Ego2Robot  
+
+**Integration & UX**  
+- [ ] Add small visualization notebook:
+      - show frames + masks + event spans from `episode.json`  
+- [ ] Add CLI flag to select event mode:
+      - `--event-mode fixed|motion`  
+- [ ] Keep `process_video_to_dataset(...)` as the canonical Python entrypoint
+      and ensure tests stay green as perception and events evolve.

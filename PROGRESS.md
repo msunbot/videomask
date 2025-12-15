@@ -287,3 +287,80 @@
       - `--event-mode fixed|motion`  
 - [ ] Keep `process_video_to_dataset(...)` as the canonical Python entrypoint
       and ensure tests stay green as perception and events evolve.
+
+# Week 4 (Days 24-28): Perception Polish & Phase 3 Foundations  
+**Date: Dec 11, 2025**
+
+## Day 24 (Dec 11) — Multi-Object Schema + Episode Infrastructure Upgrade ✅
+- [x] Added `InstanceMask` dataclass (Phase 3 foundational type)  
+- [x] Extended `FrameRecord` with `instances: List[InstanceMask]`  
+- [x] Preserved backward compatibility with legacy `mask_path`  
+- [x] Updated `Episode.from_dict` with deep nested dataclass reconstruction  
+- [x] Verified `episode.json` round-trip load/save remains consistent  
+**Result:** Episode schema now fully supports multi-object perception.
+
+---
+
+## Day 25 (Dec 11) — Mask Quality Metrics + Perception Enhancement Layer ✅
+- [x] Created `MaskStats` + `compute_mask_stats(mask_path)`  
+- [x] New module: `conceptops/perception/mask_metrics.py`  
+- [x] Pipeline now computes `area_px` & `area_ratio` for every mask  
+- [x] Per-frame `mask_quality` added to metadata  
+- [x] Instances enriched with per-mask stats; multi-mask support generalized  
+**Result:** Each frame now carries meaningful mask diagnostics for downstream ML.
+
+---
+
+## Day 26 (Dec 11) — Multi-Object Ready Frame Builder + Integration Tests ✅
+- [x] `_build_frame_records` now handles:
+  - `masks=[str, str, ...]` → single-object
+  - `masks=[[m1, m2, ...], [...]]` → multi-object  
+- [x] Per-frame `instances[...]` populated with metrics  
+- [x] `mask_quality` aggregates: max/min/mean area ratios  
+- [x] Updated integrated pipeline tests to ensure schema correctness  
+**Result:** Perception layer is now structurally ready for multi-object SAM-3 outputs.
+
+---
+
+## Day 27 (Dec 11) — Export Formats (LeRobot / RLDS / COCO) + Testing Suite ✅
+- [x] Implemented `episode_to_lerobot(episode)`  
+- [x] Implemented `episode_to_rlds(episode)`  
+- [x] Implemented full COCO exporter (`export_coco_from_episode`)  
+- [x] Added bbox extraction from masks and COCO-style annotation builder  
+- [x] Created pytest suite for:
+  - Model detector  
+  - Exporters  
+  - COCO serialization  
+**Result:** ConceptOps can now export robot datasets in three major formats.
+
+---
+
+## Day 28 (Dec 11) — ModelEventDetector Scaffold + Mode="model" Integration + Inspection Notebook ✅  
+- [x] Added `ModelEventConfig` + `ModelEventDetector` scaffold  
+- [x] Integrated new detector into `process_video_to_dataset` (`mode="model"`)  
+- [x] Stub implementation delegates to motion detector + metadata tagging  
+- [x] Added pytest confirming “model_stub” event metadata  
+- [x] Created developer notebook template for:
+  - loading episodes  
+  - RLDS + LeRobot inspections  
+  - COCO bbox visualization  
+**Result:** Phase 3 model slot now implemented; export + inspection tools complete.
+
+---
+
+# Week 4 Summary  
+**Completed:**
+- Multi-object perception schema + mask metrics  
+- Enhanced Episode & FrameRecord data model  
+- Full export stack (LeRobot / RLDS / COCO)  
+- Model-based event detector placeholder  
+- Integrated tests + inspection notebook template  
+
+**Next (Phase 3: Weeks 7–10):**
+- Collect labeled clips for event taxonomy  
+- Manual annotation via `event_labels.json`  
+- Train event model v1  
+- Add affordance classifier (graspable, pushable, rotateable)  
+- Add Δpose / motion vectors  
+- Strengthen COCO exporter with polygons once SAM-3 masks are real  
+- Build dataset viewer notebook + CLI exports  

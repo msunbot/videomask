@@ -1,0 +1,23 @@
+{
+  "version": "1.0",
+  "labels": [
+    "pick",
+    "place",
+    "open",
+    "close",
+    "pour",
+    "wipe",
+    "press",
+    "move"
+  ],
+  "descriptions": {
+    "pick": "Hand picks an object up from a surface",
+    "place": "Hand places an object down onto a surface",
+    "open": "Opens a container/drawer/door",
+    "close": "Closes a container/drawer/door",
+    "pour": "Pours from a container into another",
+    "wipe": "Wipes/cleans a surface area",
+    "press": "Presses a button/switch",
+    "move": "General movement/transport action (fallback label)"
+  }
+}

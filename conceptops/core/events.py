@@ -4,8 +4,13 @@ import argparse
 import json
 from dataclasses import dataclass
 from typing import List, Optional
+import torch
+import torch.nn.functional as F 
 
 from conceptops.types import FrameRecord, EventRecord
+from conceptops.training.model import TinyEventMLP
+from conceptops.training.features import extract_window_features
+from conceptops.training.proposals import sliding_window_proposals
 
 from pathlib import Path
 from typing import List, Dict
@@ -18,6 +23,217 @@ DEFAULT_IOU_THRESHOLD = 0.90
 MIN_EVENT_LENGTH_FRAMES = 2
 CENTROID_MOVE_THRESHOLD = 0.08  # ~8% of frame width/height
 AREA_CHANGE_THRESHOLD = 0.10    # 10% relative area change
+
+@dataclass
+class ModelEventConfig:
+    """
+    Configuration for a model-based event detector.
+
+    This is the "serious ML" interface. For now it's a scaffold that
+    can be backed by a stub or by a real trained model later.
+    """
+    model_name: str = "stub_v1"
+    score_threshold: float = 0.0
+    base_label: str = "model_event"
+    # Extra fields (e.g., path to weights, device) can be added later.
+
+@dataclass
+class ModelEventDetector:
+    """
+    Model-backed event detector.
+
+    Phase 3 baseline:
+    - Proposals: sliding windows over frames
+    - Features: handcrafted (mask area stats + frame diff)
+    - Model: Tiny MLP classifier trained on labeled spans
+    """
+
+    def __init__(
+            self,
+            model_dir: str,
+            window_size: int = 8,
+            stride: int = 4,
+            topk: int = 5,
+            min_score: float = 0.55,
+            nms_iou: float = 0.5,
+        ):
+        self.model_dir = Path(model_dir)
+        self.window_size = int(window_size)
+        self.stride = int(stride)
+        self.topk = int(topk)
+        self.min_score = float(min_score)
+        self.nms_iou = float(nms_iou)
+
+        # Load artifacts once at init (fast inference).
+        self._model, self._labels, self._in_dim = self._load_model_artifacts(self.model_dir)
+
+    def _load_model_artifacts(self, model_dir: Path):
+        model_path = model_dir / "model.pt"
+        labels_path = model_dir / "labels.json"
+        feat_path = model_dir / "feature_spec.json"
+
+        if not model_path.exists():
+            raise FileNotFoundError(f"model.pt not found: {model_path}")
+        if not labels_path.exists():
+            raise FileNotFoundError(f"labels.json not found: {labels_path}")
+        if not feat_path.exists():
+            raise FileNotFoundError(f"feature_spec.json not found: {feat_path}")
+
+        labels_payload = json.loads(labels_path.read_text())
+        labels = labels_payload["labels"]
+        num_classes = len(labels)
+
+        feat_payload = json.loads(feat_path.read_text())
+        in_dim = int(feat_payload["feature_dim"])
+
+        model = TinyEventMLP(in_dim=in_dim, num_classes=num_classes)
+        state = torch.load(model_path, map_location="cpu")
+        model.load_state_dict(state)
+        model.eval()
+
+        return model, labels, in_dim
+
+    # Phase 3: temporal IoU + NMS
+    def _temporal_iou(self, a_s: int, a_e: int, b_s: int, b_e: int) -> float:
+        inter_s = max(a_s, b_s)
+        inter_e = min(a_e, b_e)
+        if inter_e < inter_s:
+            return 0.0
+        inter = inter_e - inter_s + 1
+        a_len = a_e - a_s + 1
+        b_len = b_e - b_s + 1
+        union = a_len + b_len - inter
+        return float(inter) / float(union)
+
+
+    def _nms(self, candidates: list[tuple[int, float, int, int, int]]) -> list[tuple[int, float, int, int, int]]:
+        """
+        candidates: [(proposal_index, score, cls_id, start, end), ...] sorted desc by score.
+
+        Keep highest-score spans; suppress spans with IoU >= nms_iou against any kept span.
+        """
+        kept: list[tuple[int, float, int, int, int]] = []
+        for cand in candidates:
+            _, score, _, s, e = cand
+            if score < self.min_score:
+                continue
+
+            too_close = False
+            for kept_c in kept:
+                _, kept_score, _, ks, ke = kept_c
+                if self._temporal_iou(s, e, ks, ke) >= self.nms_iou:
+                    too_close = True
+                    break
+
+            if not too_close:
+                kept.append(cand)
+
+            if len(kept) >= self.topk:
+                break
+
+        return kept
+
+    def detect(self, frame_records, episode_dir: str) -> list:
+        """
+        Return List[EventRecord] for the episode.
+
+        - Accept frame_records (List[FrameRecord]) because Episode doesn't exist yet when process_video_to_dataset runs event detection
+        - Still use episode_dir to read frames_raw/ for frame-diff features 
+        """
+        from conceptops.types import EventRecord  # local import to avoid circulars
+
+        ep_dir = Path(episode_dir)
+        num_frames = len(frame_records)
+
+        # >>> Phase 3: build area_series from frame_records
+        def _area_ratio(fr) -> float:
+            mq = (fr.metadata or {}).get("mask_quality", {})
+            if "area_ratio" in mq:
+                return float(mq["area_ratio"])
+            if "mean_area_ratio" in mq:
+                return float(mq["mean_area_ratio"])
+            return 0.0
+
+        area_series = [_area_ratio(fr) for fr in frame_records]
+
+        # >>> Phase 3: minimal adapter so features.py can stay unchanged
+        class _Ep:
+            def __init__(self, frames):
+                self.frames = frames
+
+        episode_like = _Ep(frame_records)
+
+        # 1) propose spans (coverage baseline)
+        # use motion-guided proposals + coverage
+        from conceptops.training.proposals import motion_guided_proposals_from_area
+
+        proposals = motion_guided_proposals_from_area(
+            area_series=area_series,
+            window_size=self.window_size,
+            stride=self.stride,
+            topk=10,
+        )
+        if not proposals:
+            return []
+
+        # 2) featurize all proposals
+        X = []
+        spans = []
+        for sp in proposals:
+            feats = extract_window_features(
+                episode=episode_like,
+                episode_dir=ep_dir,
+                start_frame=sp.start_frame,
+                end_frame=sp.end_frame,
+            )
+            X.append(feats)
+            spans.append((sp.start_frame, sp.end_frame))
+
+        X_np = np.stack(X).astype(np.float32)
+        X_t = torch.from_numpy(X_np)
+
+        # 3) score with model
+        with torch.no_grad():
+            logits = self._model(X_t)
+            probs = F.softmax(logits, dim=1).numpy()
+            cls_ids = np.argmax(probs, axis=1)
+            confs = probs[np.arange(len(cls_ids)), cls_ids]
+
+        # 4) rank spans by confidence, take topk
+        ranked = sorted(
+            [(i, float(confs[i]), int(cls_ids[i]), spans[i][0], spans[i][1]) for i in range(len(spans))],
+            key=lambda x: x[1],
+            reverse=True,
+        )
+
+        # apply score threshold + NMS dedup 
+        top = self._nms(ranked)
+
+        # 5) emit EventRecords
+        events = []
+        for event_id, (proposal_index, score, cls_id, s, e) in enumerate(top):
+            label = self._labels[cls_id]
+            events.append(
+                EventRecord(
+                    event_id=event_id,
+                    label=label,
+                    start_frame=s,
+                    end_frame=e,
+                    score=score,
+                    metadata={
+                        "source": "model",
+                        "proposal_method": "sliding_window",
+                        "window_size": self.window_size,
+                        "stride": self.stride,
+                        "proposal_index": proposal_index,
+                        "model_dir": str(self.model_dir),
+                    },
+                )
+            )
+        # Phase 3: debug counts
+        # print(f"[ModelEventDetector] proposals={len(proposals)} ranked={len(ranked)} kept={len(top)} min_score={self.min_score}")
+        
+        return events
 
 @dataclass
 class EventConfig:
@@ -116,7 +332,7 @@ class MotionEventConfig:
     threshold_multiplier: float = 2.0   # how far above median to treat as "active"
     min_event_length: int = 3          # min number of frames per event
     base_label: str = "move"           # label prefix for motion events
-
+    min_area_ratio: float = 0.0         # minimum mask area to consider frame "object-present"
 
 class MotionEventDetector:
     """
@@ -182,13 +398,31 @@ class MotionEventDetector:
 
         motion = self._compute_motion_series(frames)
 
+        # Compute a per-frame "max instance area_ratio".
+        max_area_per_frame: List[float] = []
+        for f in frames:
+            if f.instances:
+                max_area = max(
+                    (inst.area_ratio or 0.0) for inst in f.instances
+                )
+            else:
+                max_area = 0.0
+            max_area_per_frame.append(max_area)
+
         # Compute a data-driven threshold based on the median motion.
         median_motion = float(np.median(motion)) if motion else 0.0
-        threshold = median_motion * self.config.threshold_multiplier
+        if median_motion == 0.0:
+            threshold = 0.0
+        else:
+            threshold = median_motion * self.config.threshold_multiplier
 
-        # Mark frames as "active" if motion >= threshold.
-        active = [m >= threshold for m in motion]
-
+        # combine motion & area
+        active: List[bool] = []
+        for i in range(n): 
+            motion_ok = motion[i] >= threshold
+            area_ok = max_area_per_frame[i] >= self.config.min_area_ratio
+            active.append(motion_ok and area_ok)
+            
         # Group contiguous active spans into events.
         event_id = 0
         i = 0

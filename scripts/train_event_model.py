@@ -1,139 +1,178 @@
+# scripts/train_event_model.py
+"""
+Train Phase 3 event classification model (ConceptOps).
+
+Repo-aligned:
+- load labeled events via iter_labeled_episodes (taxonomy-aware)
+- featurize using extract_window_features (same as inference)
+
+Adds:
+- --label_collapse {none,demo3}
+- --use_class_weights (recommended for your current imbalance)
+
+Usage:
+  python scripts/train_event_model.py \
+    --episodes_root data/episodes \
+    --taxonomy_path conceptops/config/event_taxonomy.json \
+    --out_dir data/models/event_model_demo3_wt \
+    --label_collapse demo3 \
+    --use_class_weights
+"""
+
 from __future__ import annotations
 
 import argparse
 import json
 from pathlib import Path
+from typing import Any, Dict, List
 
 import numpy as np
 import torch
-import torch.nn.functional as F
+import torch.nn as nn
 
-from conceptops.training.dataset import iter_labeled_episodes, build_label_set, normalize_events_to_nonoverlapping_spans
-from conceptops.training.features import extract_window_features
 from conceptops.training.model import TinyEventMLP
+from conceptops.training.features import extract_window_features
+from conceptops.training.dataset import iter_labeled_episodes, build_label_set
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Train Phase 3 baseline event model from labeled episodes.")
-    parser.add_argument("--episodes-root", type=str, default="data/episodes")
-    parser.add_argument("--taxonomy", type=str, default="config/event_taxonomy.json")
-    parser.add_argument("--out-dir", type=str, default="data/models/event_model_v0")
-    parser.add_argument("--epochs", type=int, default=50)
-    parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--train-mode", type=str, default="span", choices=["span", "frame"])
-    args = parser.parse_args()
+def save_json(path: Path, obj: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(obj, indent=2), encoding="utf-8")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--episodes_root", type=str, default="data/episodes")
+    ap.add_argument("--taxonomy_path", type=str, required=True)
+    ap.add_argument("--out_dir", type=str, default="data/models/event_model_demo3_wt")
+    ap.add_argument("--epochs", type=int, default=300)
+    ap.add_argument("--lr", type=float, default=1e-3)
+    ap.add_argument("--seed", type=int, default=0)
+
+    ap.add_argument("--label_collapse", type=str, default="none")
+    ap.add_argument(
+        "--use_class_weights",
+        action="store_true",
+        help="Use inverse-frequency class weights in CrossEntropyLoss (helps prevent collapse).",
+    )
+    args = ap.parse_args()
+
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
 
     episodes_root = Path(args.episodes_root)
-    taxonomy_path = Path(args.taxonomy)
-    if not taxonomy_path.exists():
-        candidate = Path("conceptops") / taxonomy_path
-        if candidate.exists():
-            taxonomy_path = candidate
-        else:
-            raise FileNotFoundError(...)
-    # Phase 3: out_dir should always be created
+    taxonomy_path = Path(args.taxonomy_path)
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1) Load labeled episodes
-    labeled_eps = list(iter_labeled_episodes(episodes_root, taxonomy_path, require_labels=True))
+    labeled_eps = list(
+        iter_labeled_episodes(
+            episodes_root=episodes_root,
+            taxonomy_path=taxonomy_path,
+            require_labels=True,
+            label_collapse=args.label_collapse,
+        )
+    )
     if not labeled_eps:
-        raise RuntimeError("No labeled episodes found. Create event_labels.json for at least 1 clip first.")
+        raise RuntimeError("No labeled episodes found.")
 
-    # 2) Label set present in data (training only on what you actually labeled)
     labels = build_label_set(labeled_eps)
-    label_to_id = {l: i for i, l in enumerate(labels)}
-    id_to_label = {i: l for l, i in label_to_id.items()}
+    label_to_id = {lab: i for i, lab in enumerate(labels)}
+    num_classes = len(labels)
 
-    print(f"Found {len(labeled_eps)} labeled episodes.")
-    print(f"Training labels ({len(labels)}): {labels}")
+    X_list: List[np.ndarray] = []
+    y_list: List[int] = []
 
-    # 3) Build training dataset: one sample per labeled span
-    X_list = []
-    y_list = []
+    label_counts: Dict[str, int] = {lab: 0 for lab in labels}
 
-    # Phase 3: frame-mode sample builder
-    def _frame_labels_from_spans(spans, num_frames: int, background="__none__"):
-        labels = [background] * num_frames
-        for (s, e, lab) in spans:
-            for i in range(max(0, s), min(num_frames - 1, e) + 1):
-                labels[i] = lab
-        return labels
-
-    # Train on normalized non-overlapping spans
-    # Phase 3: span vs frame training
     for le in labeled_eps:
-        spans = normalize_events_to_nonoverlapping_spans(le.episode, le.events)
-        num_frames = len(le.episode.frames)
+        episode = le.episode
+        ep_dir = le.episode_dir
+        for ev in le.events:
+            feats = extract_window_features(
+                episode=episode,
+                episode_dir=ep_dir,
+                start_frame=int(ev.start_frame),
+                end_frame=int(ev.end_frame),
+            )
+            X_list.append(feats)
+            y_list.append(label_to_id[ev.label])
+            label_counts[ev.label] += 1
 
-        if args.train_mode == "span":
-            for (s, e, label) in spans:
-                feats = extract_window_features(le.episode, le.episode_dir, s, e)
-                X_list.append(feats)
-                y_list.append(label_to_id[label])
-
-        else:  # frame mode
-            frame_labels = _frame_labels_from_spans(spans, num_frames=num_frames, background="__none__")
-
-            # Train only on labeled frames (skip background) to start.
-            for t, lab in enumerate(frame_labels):
-                if lab == "__none__":
-                    continue
-
-                # Small symmetric window around frame t
-                half = 4
-                s = max(0, t - half)
-                e = min(num_frames - 1, t + half)
-
-                feats = extract_window_features(le.episode, le.episode_dir, s, e)
-                X_list.append(feats)
-                y_list.append(label_to_id[lab])
-
-    # Phase 3: materialize arrays before printing
-    X = np.stack(X_list, axis=0).astype(np.float32)
+    X = np.stack(X_list).astype(np.float32)
     y = np.array(y_list, dtype=np.int64)
 
-    print(f"Built {len(y)} training samples (train_mode={args.train_mode}).")
+    in_dim = int(X.shape[1])
+    model = TinyEventMLP(in_dim=in_dim, num_classes=num_classes)
 
+    X_t = torch.from_numpy(X)
+    y_t = torch.from_numpy(y)
 
-    # 4) Train tiny model
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = TinyEventMLP(in_dim=X.shape[1], num_classes=len(labels)).to(device)
-    opt = torch.optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=float(args.lr))
 
-    X_t = torch.from_numpy(X).to(device)
-    y_t = torch.from_numpy(y).to(device)
+    # --- NEW: class weights ---
+    class_weights_t = None
+    if args.use_class_weights:
+        # Inverse frequency weighting (simple, effective at small scale).
+        # weight[c] = total / (num_classes * count[c])
+        total = float(len(y_list))
+        weights = []
+        for lab in labels:
+            c = float(label_counts[lab])
+            w = total / (max(1.0, c) * float(num_classes))
+            weights.append(w)
+        class_weights_t = torch.tensor(weights, dtype=torch.float32)
+        print("[train] class weights:", {labels[i]: float(weights[i]) for i in range(len(labels))})
 
-    for epoch in range(args.epochs):
-        model.train()
+    criterion = nn.CrossEntropyLoss(weight=class_weights_t)
+
+    model.train()
+    for epoch in range(int(args.epochs)):
+        optimizer.zero_grad()
         logits = model(X_t)
-        loss = F.cross_entropy(logits, y_t)
-
-        opt.zero_grad()
+        loss = criterion(logits, y_t)
         loss.backward()
-        opt.step()
+        optimizer.step()
 
-        if (epoch + 1) % 10 == 0 or epoch == 0:
-            pred = torch.argmax(logits, dim=1)
-            acc = (pred == y_t).float().mean().item()
-            print(f"epoch {epoch+1:03d} loss={loss.item():.4f} acc={acc:.3f}")
+        if epoch in (0, 1, 2) or (epoch + 1) % 50 == 0:
+            with torch.no_grad():
+                pred = torch.argmax(logits, dim=1)
+                acc = float((pred == y_t).float().mean().item())
+                # Also print predicted label distribution to detect collapse
+                pred_counts = {}
+                for p in pred.numpy().tolist():
+                    lab = labels[int(p)]
+                    pred_counts[lab] = pred_counts.get(lab, 0) + 1
+            print(f"[train] epoch={epoch+1:03d} loss={loss.item():.4f} acc={acc:.3f} pred_counts={pred_counts}")
 
-    # 5) Save artifacts
-    torch.save(model.state_dict(), out_dir / "model.pt")
-    (out_dir / "labels.json").write_text(json.dumps(
-        {"labels": labels, "label_to_id": label_to_id, "id_to_label": id_to_label},
-        indent=2
-    ))
+    model_path = out_dir / "model.pt"
+    torch.save(model.state_dict(), str(model_path))
 
-    # Include feature spec for future compatibility
-    (out_dir / "feature_spec.json").write_text(json.dumps(
-        {"feature_dim": int(X.shape[1]), "features": ["area_mean","area_std","area_min","area_max","area_mad","diff_mean","diff_max"]},
-        indent=2
-    ))
+    labels_obj: Dict[str, Any] = {
+        "labels": labels,
+        "label_to_id": label_to_id,
+        "id_to_label": {str(v): k for k, v in label_to_id.items()},
+    }
+    save_json(out_dir / "labels.json", labels_obj)
 
-    print(f"\nSaved model to: {out_dir / 'model.pt'}")
-    print(f"Saved labels to: {out_dir / 'labels.json'}")
-    print(f"Saved feature spec to: {out_dir / 'feature_spec.json'}")
+    feature_spec = {
+        "feature_dim": int(in_dim),
+        "label_collapse": args.label_collapse,
+        "label_counts": label_counts,
+        "episodes_root": str(episodes_root),
+        "taxonomy_path": str(taxonomy_path),
+        "num_examples": int(len(y_list)),
+        "num_episodes": int(len(labeled_eps)),
+        "use_class_weights": bool(args.use_class_weights),
+    }
+    save_json(out_dir / "feature_spec.json", feature_spec)
+
+    print("\nSaved:")
+    print(f"- {model_path}")
+    print(f"- {out_dir / 'labels.json'}")
+    print(f"- {out_dir / 'feature_spec.json'}")
+    print("\nLabel counts:", label_counts)
+    print("Labels:", labels)
 
 
 if __name__ == "__main__":

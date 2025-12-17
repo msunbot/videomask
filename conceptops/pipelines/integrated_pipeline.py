@@ -14,24 +14,12 @@ from conceptops.core.events import (
     MotionEventDetector,
     MotionEventConfig,
     ModelEventDetector,
-    ModelEventConfig,
 )
 from conceptops.perception.mask_metrics import compute_mask_stats
 from videomask.pipeline.segmenter import VideoSegmenter
 
+
 def _load_videomask_metadata(out_dir: Path) -> Dict[str, Any]:
-    """
-    Load VideoMask's metadata.json from `out_dir`.
-
-    VideoMask v0.1 stores:
-      - frames: list of frame paths (strings)
-      - masks: list of mask paths (strings)
-      - fps: frame sampling rate
-      - config: backend + parameters (depends on implementation)
-
-    We keep this helper small and focused so we can easily swap in
-    newer metadata formats later.
-    """
     metadata_path = out_dir / "metadata.json"
     if not metadata_path.exists():
         raise FileNotFoundError(f"VideoMask metadata.json not found at: {metadata_path}")
@@ -45,37 +33,20 @@ def _build_frame_records(
     vm_metadata: Dict[str, Any],
     extraction_fps: Optional[float],
 ) -> List[FrameRecord]:
-    """
-    Build a list of FrameRecord objects by combining:
-
-      - The ordered frame paths from ingestion.
-      - The lists of frames/masks from VideoMask's metadata.json.
-
-    Supports two mask formats in vm_metadata["masks"]:
-      1) List[str]: one mask path per frame (legacy single-object).
-      2) List[List[str]]: list of mask paths per frame (multi-object).
-    """
     frames_from_vm = vm_metadata.get("frames") or ingest_frame_paths
     masks_raw = vm_metadata.get("masks") or []
 
     frame_records: List[FrameRecord] = []
 
-    # Normalize masks into a list of list-of-paths for uniform handling.
-    # Case 1: single list of strings
     if masks_raw and isinstance(masks_raw[0], str):
         masks_per_frame: List[List[str]] = [[p] for p in masks_raw]
     else:
-        # Assume already list-of-lists or empty.
         masks_per_frame = masks_raw
 
     for idx, frame_path in enumerate(frames_from_vm):
-        # For safety, if masks_per_frame is shorter than frames, use empty list.
         frame_mask_paths: List[str] = []
         if idx < len(masks_per_frame) and masks_per_frame[idx] is not None:
-            # Some backends may produce None entries; filter them out.
-            frame_mask_paths = [
-                str(p) for p in masks_per_frame[idx] if p is not None
-            ]
+            frame_mask_paths = [str(p) for p in masks_per_frame[idx] if p is not None]
 
         timestamp_sec = None
         if extraction_fps and extraction_fps > 0:
@@ -84,7 +55,6 @@ def _build_frame_records(
         instances: List[InstanceMask] = []
         frame_metadata: Dict[str, Any] = {}
 
-        # Compute stats for each instance mask in this frame.
         areas: List[float] = []
         for inst_id, m_path in enumerate(frame_mask_paths):
             stats = compute_mask_stats(m_path)
@@ -100,10 +70,8 @@ def _build_frame_records(
             )
             areas.append(stats.area_ratio)
 
-        # Legacy single-mask field: point to the first instance, if any.
         mask_path_legacy: Optional[str] = frame_mask_paths[0] if frame_mask_paths else None
 
-        # Aggregate mask quality for this frame.
         if areas:
             mean_area = sum(areas) / len(areas)
             frame_metadata["mask_quality"] = {
@@ -128,6 +96,43 @@ def _build_frame_records(
     return frame_records
 
 
+def _resolve_model_dir(e2r_config: Dict[str, Any]) -> str:
+    """
+    Backwards compatible resolution for model artifacts.
+
+    Preferred (new):
+      e2r_config["model_dir"] = "/path/to/model_artifacts"
+
+    Legacy (tests / older code):
+      e2r_config["model_name"] = "stub_v1"  -> resolves to "data/models/stub_v1"
+
+    Safety fallback (so demos/tests don’t hard-fail if someone forgets):
+      data/models/event_model_demo3_wt if present, else data/models/event_model_demo3, else error.
+    """
+    # 1) New explicit path
+    if e2r_config.get("model_dir"):
+        return str(e2r_config["model_dir"])
+
+    # 2) Legacy name -> data/models/<name>
+    model_name = e2r_config.get("model_name")
+    if model_name:
+        candidate = Path("data/models") / str(model_name)
+        return str(candidate)
+
+    # 3) Safe defaults (prefer the best demo model)
+    for p in [
+        Path("data/models/event_model_demo3_wt"),
+        Path("data/models/event_model_demo3"),
+    ]:
+        if (p / "model.pt").exists() and (p / "labels.json").exists():
+            return str(p)
+
+    raise ValueError(
+        "mode='model' requires either e2r_config['model_dir'] or legacy e2r_config['model_name'], "
+        "and no default demo model artifacts were found under data/models/."
+    )
+
+
 def process_video_to_dataset(
     video_path: str,
     out_dir: str,
@@ -137,15 +142,11 @@ def process_video_to_dataset(
 ) -> str:
     """
     Integrated pipeline v0.5:
-
-      1. Ingest video → frames + VideoMetadata.
-      2. Run VideoMask segmentation.
-      3. Read VideoMask's metadata.json.
-      4. Run a simple event detector (v0.5).
-      5. Build Episode and write `episode.json`.
-
-    Returns:
-        Path to `episode.json` as a string.
+      1) ingest video
+      2) run VideoMask
+      3) build FrameRecord list
+      4) run event detector
+      5) build Episode and write episode.json
     """
     vm_config = vm_config or {}
     e2r_config = e2r_config or {}
@@ -153,7 +154,6 @@ def process_video_to_dataset(
     out_dir_path = Path(out_dir)
     out_dir_path.mkdir(parents=True, exist_ok=True)
 
-    # 1) Ingestion
     ingest_result = ingest_video(
         video_path=video_path,
         out_dir=out_dir_path,
@@ -162,7 +162,6 @@ def process_video_to_dataset(
         max_frames=vm_config.get("max_frames"),
     )
 
-    # 2) Segmentation via VideoMask
     seg = VideoSegmenter(
         backend=vm_config.get("backend", "dummy"),
         fps=int(ingest_result.metadata.extraction_fps or vm_config.get("fps", 2)),
@@ -172,18 +171,15 @@ def process_video_to_dataset(
     )
     seg.run(video_path, out_dir=str(out_dir_path))
 
-    # 3) Load VideoMask metadata.json
     vm_metadata = _load_videomask_metadata(out_dir_path)
 
-    # 4) Build canonical FrameRecord list
     frame_records = _build_frame_records(
         ingest_frame_paths=ingest_result.frame_paths,
         vm_metadata=vm_metadata,
         extraction_fps=ingest_result.metadata.extraction_fps,
     )
 
-    # 5) Run event detector (v0.5)
-    mode = e2r_config.get("mode", "fixed")  # "fixed", "motion", "motion_mask", or "model"
+    mode = e2r_config.get("mode", "fixed")  # fixed, motion, motion_mask, model
 
     if mode in ("motion", "motion_mask"):
         motion_cfg = MotionEventConfig(
@@ -201,18 +197,11 @@ def process_video_to_dataset(
             "min_area_ratio": motion_cfg.min_area_ratio,
         }
 
-    # >>> Phase 3: model mode uses trained artifact-backed ModelEventDetector
     elif mode == "model":
-        # New Phase 3 model config: point to trained artifact directory.
-        #
-        # Expected e2r_config keys (passed from scripts/batch_build_episodes.py or user code):
-        # - model_dir: str path to directory containing model.pt, labels.json, feature_spec.json
-        # - window_size, stride, topk: proposal settings
-        # - min_score: score threshold for returning events
-        # - nms_iou: temporal IoU threshold for dedup (NMS)
-        model_dir = e2r_config.get("model_dir", None)
-        if not model_dir:
-            raise ValueError("e2r_config['model_dir'] is required when mode='model'")
+        # Backwards compatible: accept model_dir or model_name.
+        model_dir = _resolve_model_dir(e2r_config)
+
+        inference_profile = (e2r_config or {}).get("inference_profile", "default")
 
         detector = ModelEventDetector(
             model_dir=str(model_dir),
@@ -221,17 +210,19 @@ def process_video_to_dataset(
             topk=int(e2r_config.get("topk", 5)),
             min_score=float(e2r_config.get("min_score", 0.55)),
             nms_iou=float(e2r_config.get("nms_iou", 0.5)),
+            inference_profile=str(inference_profile),
         )
 
-        # Keep event_config purely descriptive for metadata/debugging.
         event_config = {
             "mode": "model",
             "model_dir": str(model_dir),
+            "model_name": e2r_config.get("model_name"),  # may be None
             "window_size": int(e2r_config.get("window_size", 8)),
             "stride": int(e2r_config.get("stride", 4)),
             "topk": int(e2r_config.get("topk", 5)),
             "min_score": float(e2r_config.get("min_score", 0.55)),
             "nms_iou": float(e2r_config.get("nms_iou", 0.5)),
+            "inference_profile": str(inference_profile),
         }
 
     else:
@@ -249,27 +240,21 @@ def process_video_to_dataset(
             "base_label": base_label,
         }
 
-    # Phase 3: detector API compatibility shim
-    # ModelEventDetector needs episode_dir for frame-diff features.
-    # Legacy detectors (Simple/Motion) use their original detect(...) signature.
     if mode == "model":
         events = detector.detect(
             frame_records=frame_records,
             episode_dir=str(out_dir_path),
         )
     else:
-        # Keep existing behavior for non-model detectors.
-        # Most likely their detect() expects a list of FrameRecord (positional)
-        # and returns EventRecord[].
         events = detector.detect(frame_records)
-    
+
     episode = Episode(
         episode_id=0,
         video=ingest_result.metadata,
         frames=frame_records,
         events=events,
         extra={
-        "videomask_metadata": vm_metadata,
+            "videomask_metadata": vm_metadata,
             "event_config": event_config,
         },
     )

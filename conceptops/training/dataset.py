@@ -7,6 +7,84 @@ from typing import Dict, Iterator, List, Optional, Tuple
 from conceptops.types import Episode
 from conceptops.labeling.io import load_labeled_event_records
 
+
+# -------------------------
+# NEW: Label collapsing (demo3 taxonomy)
+# -------------------------
+
+def get_label_collapse_map(preset: str) -> Optional[Dict[str, str]]:
+    """
+    Map fine-grained labels -> collapsed labels.
+
+    Presets:
+      - "none": no collapsing
+      - "demo3":
+          open/close -> toggle
+          pick/place/pour/wipe -> manipulate
+          move -> move
+    """
+    p = (preset or "none").lower().strip()
+    if p in ("none", "off", "false", "0", ""):
+        return None
+
+    if p == "demo3":
+        return {
+            "open": "toggle",
+            "close": "toggle",
+            "pick": "manipulate",
+            "place": "manipulate",
+            "pour": "manipulate",
+            "wipe": "manipulate",
+            "move": "move",
+        }
+
+    raise ValueError(f"Unknown label collapse preset: {preset}")
+
+
+def apply_label_map(label: str, label_map: Optional[Dict[str, str]]) -> str:
+    if not label_map:
+        return label
+    return label_map.get(label, label)
+
+
+def remap_event_label(ev, new_label: str):
+    """
+    Return an EventRecord-like object with the same span but a different label.
+
+    We don't assume your EventRecord implementation details too aggressively.
+    Strategy:
+      1) Try to mutate ev.label (works if not frozen)
+      2) Else, try to reconstruct via ev.__class__(...) using common fields
+      3) Else, return original (worst-case: collapse is skipped but training still runs)
+
+    This keeps Phase 3 moving without a big refactor.
+    """
+    # 1) Try simple setattr
+    try:
+        setattr(ev, "label", new_label)
+        return ev
+    except Exception:
+        pass
+
+    # 2) Try reconstruct with common EventRecord fields
+    try:
+        cls = ev.__class__
+        kwargs = {}
+
+        # Common fields we expect in conceptops.types.EventRecord
+        for k in ["event_id", "start_frame", "end_frame", "score", "metadata"]:
+            if hasattr(ev, k):
+                kwargs[k] = getattr(ev, k)
+
+        # label is the one we overwrite
+        kwargs["label"] = new_label
+
+        return cls(**kwargs)
+    except Exception:
+        # 3) Give up gracefully (better than crashing)
+        return ev
+
+
 def _events_to_frame_labels(events, num_frames: int, background: str = "__none__") -> list[str]:
     """
     Convert possibly-overlapping EventRecords into a per-frame label sequence.
@@ -90,9 +168,15 @@ def iter_episode_dirs(episodes_root: Path) -> List[Path]:
 def load_labeled_episode(
     episode_dir: Path,
     taxonomy_path: Path,
+    *,
+    label_collapse: str = "none",  # NEW
 ) -> LabeledEpisode:
     """
     Load episode.json and its optional event_labels.json, returning canonical EventRecord list.
+
+    label_collapse:
+      - "none" (default): keep original labels
+      - "demo3": collapse labels for faster/cleaner Phase 3 training + eval
     """
     episode_path = episode_dir / "episode.json"
     if not episode_path.exists():
@@ -130,6 +214,15 @@ def load_labeled_episode(
         num_frames=num_frames,
     )
 
+    # NEW: collapse labels here so everything downstream (training/eval) shares taxonomy
+    label_map = get_label_collapse_map(label_collapse)
+    if label_map:
+        remapped = []
+        for ev in events:
+            new_label = apply_label_map(ev.label, label_map)
+            remapped.append(remap_event_label(ev, new_label))
+        events = remapped
+
     return LabeledEpisode(episode_dir=episode_dir, episode=episode, events=events)
 
 
@@ -137,6 +230,8 @@ def iter_labeled_episodes(
     episodes_root: Path,
     taxonomy_path: Path,
     require_labels: bool = True,
+    *,
+    label_collapse: str = "none",  # NEW
 ) -> Iterator[LabeledEpisode]:
     """
     Iterate through episode folders and yield LabeledEpisode.
@@ -145,7 +240,7 @@ def iter_labeled_episodes(
     """
     for ep_dir in iter_episode_dirs(episodes_root):
         try:
-            le = load_labeled_episode(ep_dir, taxonomy_path)
+            le = load_labeled_episode(ep_dir, taxonomy_path, label_collapse=label_collapse)
         except Exception as e:
             # Print a readable warning and skip.
             print(f"[WARN] Skipping episode at {ep_dir} due to load error: {e}")

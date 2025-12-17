@@ -508,7 +508,7 @@
 
 ---
 
-## Day 32 (Dec 15, 2025) — Large-Scale Labeling + Dataset Maturation 🔁
+## Day 32 (Dec 16, 2025) — Large-Scale Labeling + Dataset Maturation 🔁
 - [x] Labeled **16 real video clips** using the manual labeling workflow:
   - `scripts/label_episode_events.py`
   - Canonical `event_labels.json` stored alongside each `episode.json`
@@ -527,3 +527,49 @@
   - Label-match metrics low → classifier is current bottleneck (expected at this scale)
 
 **Result:** Phase 3 data loop is fully exercised on real labeled data. System is now data-limited (not wiring-limited), with clear next levers identified for quality improvement.
+
+---
+
+## Day 33 (Dec 17, 2025) — Phase 3 Quality Polish: Demo-Clean Inference + Eval Loop ✅
+
+- [x] Shipped Phase 3 “quality + credibility” improvements (no new parallel systems):
+  - `scripts/report_label_coverage.py` now correctly reads `event_labels.json` schema (`labeled_events`, `start_frame_idx/end_frame_idx`)
+  - `scripts/eval_dashboard_summary.py` produces stable batch metrics and supports:
+    - **span-only** vs **label-match**
+    - **label collapsing** via `--label_collapse demo3` (7 labels → 3 buckets)
+- [x] Diagnosed the core failure mode: taxonomy mismatch + stale predictions:
+  - GT labels: `close/move/open/pick/place/pour/wipe`
+  - Early model artifacts were not aligned with GT → label-match was guaranteed to fail
+  - Mixed historical predictions (`segment_*`) were polluting eval until predictions were regenerated consistently
+- [x] Implemented demo taxonomy training (3 labels) and reproducible prediction generation:
+  - Added label collapsing support to training data flow (`label_collapse=demo3`)
+  - Trained demo3 model:
+    - `data/models/event_model_demo3/` → labels: `manipulate/move/toggle`
+  - Added `scripts/batch_predict_events.py`:
+    - Regenerates `pred_events.json` for every episode using a single model directory
+    - Enables consistent, reproducible batch eval
+- [x] Improved classifier stability with weighted loss:
+  - Trained weighted demo3 model:
+    - `data/models/event_model_demo3_wt/`
+    - class weights prevent “predict one class only” collapse
+- [x] Finalized **demo-clean inference profile** and enforced non-overlapping spans:
+  - Added `demo_clean_v2` inference profile in `conceptops/core/events.py`
+  - Guarantee: predicted spans are **non-overlapping** (touching boundaries allowed), matching GT expectations
+  - Demo-clean results (batch, 16 episodes / 42 GT spans):
+    - Total predicted spans: **26** (demo-clean density)
+    - Span-only micro F1 @ IoU=0.30: **0.235**
+    - Collapsed label-match micro F1 (demo3): **0.059**
+  - Interpretation:
+    - Timing/proposal quality is now credible and demo-friendly
+    - Coarse classification is improving but remains the main bottleneck
+
+**Result:** Phase 3 is now “research-grade credible”: stable taxonomy + reproducible train/infer/eval loop, demo-clean outputs, and measurable improvements with a clear next lever (classification).
+
+**Next (Phase 4 — Demo + Dashboard):**
+- Build Streamlit/Gradio UI that runs the pipeline and visualizes:
+  - segmentation playback
+  - action timeline (using demo_clean_v2 outputs)
+  - slice viewer (jump to predicted spans)
+  - export buttons (LeRobot / RLDS / COCO)
+  - download dataset as zip
+

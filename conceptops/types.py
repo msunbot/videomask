@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, asdict, field
-from typing import Any, Dict, List, Optional
-
+from typing import Any, Dict, List, Optional, Tuple
 
 # ---------- Core shared types ----------
 
@@ -31,22 +30,52 @@ class VideoMetadata:
     duration_sec: Optional[float]   # Approx. duration in seconds
     resize_short_side: Optional[int]# Shorter side resize value (pixels), if used
 
+@dataclass
+class InstanceMask:
+    """
+    One instance mask for an object in a frame.
+
+    This is the building block for multi-object support: 
+        - Each frame can have 0..N InstanceMask objects
+        - For now, we treat the legacy per-frame 'mask_path' as 
+          "instance 0", but this schema can holdmultiple masks
+          per frame when we plug in multi-object backends.
+    
+    Fields:
+        instance_id: Stable ID for the object across frames (Phase 3)
+        mask_path: Path to the binary mask image for this instance
+        area_px: Number of foreground pixels (optional quality measure)
+        area_ratio: area_px / total_pixels (0..1)
+        bbox: Optional bounding box (x_min, y_min, x_max, y_max)
+        metadata: Free-form dict for backend-specific info
+    """
+    instance_id: int
+    mask_path: str
+    area_px: Optional[int] = None
+    area_ratio: Optional[float] = None
+    bbox: Optional[Tuple[int, int, int, int]] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 @dataclass
 class FrameRecord:
     """
     A single frame in an episode, optionally linked to a segmentation mask.
 
-    We keep this fairly generic so it works for:
-      - VideoMask (single-object masks today)
-      - Multi-object masks later (by extending `metadata`)
+    Backward-compatible fields:
+      - `mask_path`: legacy single-mask path, kept for simplicity.
+
+    Multi-object aware:
+      - `instances`: list of InstanceMask objects for this frame.
+        For current single-object VideoMask, this will usually be
+        either 0 or 1 instance, but Phase 3 backends will populate
+        multiple instances.
     """
     index: int                      # 0-based frame index within the episode
     image_path: str                 # Path to RGB frame image (relative or absolute)
     mask_path: Optional[str] = None # Path to mask image, if available
     timestamp_sec: Optional[float] = None  # Time from start of video in seconds
     metadata: Dict[str, Any] = field(default_factory=dict)
-
+    instances: List[InstanceMask] = field(default_factory=list)
 
 @dataclass
 class EventRecord:
@@ -112,18 +141,34 @@ class Episode:
         """
         Reconstruct an Episode from a dict (the shape produced by to_dict).
 
-        This is the inverse of `to_dict`:
-          - Nested dicts are turned back into dataclasses.
-          - Missing optional fields fall back to sensible defaults.
-
-        We keep it explicit so schema changes are easy to reason about.
+        This explicitly rebuilds nested dataclasses (VideoMetadata,
+        FrameRecord, InstanceMask, EventRecord) instead of relying on
+        dataclass expansion, so we don't end up with dicts in places that
+        should be dataclasses.
         """
         video_md = VideoMetadata(**data["video"])
 
-        frames = [
-            FrameRecord(**frame_dict)
-            for frame_dict in data.get("frames", [])
-        ]
+        frames: List[FrameRecord] = []
+        for frame_dict in data.get("frames", []):
+            # Handle instances: list of dicts -> list of InstanceMask
+            inst_dicts = frame_dict.get("instances", [])
+            instances: List[InstanceMask] = []
+            for inst in inst_dicts:
+                # if it's already an InstanceMask, keep it
+                if isinstance(inst, InstanceMask):
+                    instances.append(inst)
+                else:
+                    instances.append(InstanceMask(**inst))
+
+            frame = FrameRecord(
+                index=frame_dict["index"],
+                image_path=frame_dict["image_path"],
+                mask_path=frame_dict.get("mask_path"),
+                timestamp_sec=frame_dict.get("timestamp_sec"),
+                metadata=frame_dict.get("metadata", {}),
+                instances=instances,
+            )
+            frames.append(frame)
 
         events = [
             EventRecord(**event_dict)
@@ -140,8 +185,5 @@ class Episode:
 
     @classmethod
     def from_json(cls, json_str: str) -> "Episode":
-        """
-        Reconstruct an Episode from a JSON string (inverse of to_json).
-        """
         data = json.loads(json_str)
         return cls.from_dict(data)

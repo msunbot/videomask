@@ -9,14 +9,10 @@ from conceptops.types import Episode
 
 def episode_to_lerobot(episode: Episode) -> Dict[str, Any]:
     """
-    Convert an Episode into a minimal LeRobot-style dict.
+    Convert an Episode into a LeRobot-style dictionary.
 
-    This is *not* a full RLDS implementation yet. The goal is:
-      - Provide a stable conversion surface.
-      - Make it trivial to serialize into the actual LeRobot / RLDS
-        formats later by adapting this function.
-
-    Structure (simplified):
+    This is still library-agnostic, but structured to be close to how
+    LeRobot / RLDS datasets are organized:
 
       {
         "episode_id": int,
@@ -24,20 +20,26 @@ def episode_to_lerobot(episode: Episode) -> Dict[str, Any]:
           "image_paths": [...],
           "timestamps_sec": [...],
           "mask_paths": [...],
+          "num_instances": [...],
         },
-        "actions": [],  # placeholder for now
-        "events": [...],
-        "metadata": {...},
+        "actions": [...],       # placeholder for now
+        "events": [...],        # per-event records
+        "metadata": {...},      # video + extra
       }
+
+    Later, you can adapt this dict into a concrete LeRobot Dataset object.
     """
+
     image_paths: List[str] = []
     timestamps: List[float] = []
     mask_paths: List[str] = []
+    num_instances: List[int] = []
 
     for frame in episode.frames:
         image_paths.append(frame.image_path)
         timestamps.append(frame.timestamp_sec if frame.timestamp_sec is not None else 0.0)
         mask_paths.append(frame.mask_path or "")
+        num_instances.append(len(frame.instances))
 
     events_serialized: List[Dict[str, Any]] = []
     for ev in episode.events:
@@ -52,15 +54,18 @@ def episode_to_lerobot(episode: Episode) -> Dict[str, Any]:
             }
         )
 
+    # Placeholder actions: will be filled by Ego2Robot model later.
+    actions: List[Any] = [None] * len(episode.frames)
+
     return {
         "episode_id": episode.episode_id,
         "observations": {
             "image_paths": image_paths,
             "timestamps_sec": timestamps,
             "mask_paths": mask_paths,
+            "num_instances": num_instances,
         },
-        # Placeholder actions: you will later fill with Ego2Robot outputs.
-        "actions": [],
+        "actions": actions,
         "events": events_serialized,
         "metadata": {
             "video": episode.video.__dict__,

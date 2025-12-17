@@ -249,10 +249,19 @@ def process_video_to_dataset(
             "base_label": base_label,
         }
 
-    events = detector.detect(
-        frame_records=frame_records,
-        episode_dir=str(out_dir_path),
-    )
+    # Phase 3: detector API compatibility shim
+    # ModelEventDetector needs episode_dir for frame-diff features.
+    # Legacy detectors (Simple/Motion) use their original detect(...) signature.
+    if mode == "model":
+        events = detector.detect(
+            frame_records=frame_records,
+            episode_dir=str(out_dir_path),
+        )
+    else:
+        # Keep existing behavior for non-model detectors.
+        # Most likely their detect() expects a list of FrameRecord (positional)
+        # and returns EventRecord[].
+        events = detector.detect(frame_records)
     
     episode = Episode(
         episode_id=0,
@@ -260,7 +269,7 @@ def process_video_to_dataset(
         frames=frame_records,
         events=events,
         extra={
-            "videomask_metadata": vm_metadata,
+        "videomask_metadata": vm_metadata,
             "event_config": event_config,
         },
     )

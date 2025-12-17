@@ -7,6 +7,17 @@ venv-3.11/
 __pycache__/
 *.pyc
 
+# Data artifacts
+data/episodes/
+data/models/
+data/raw_clips/
+
+# local dev
+.vscode
+
+# notebooks
+notebooks/
+
 # OS
 .DS_Store
 

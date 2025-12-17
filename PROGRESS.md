@@ -356,7 +356,7 @@
 - Model-based event detector placeholder  
 - Integrated tests + inspection notebook template  
 
-**Next (Phase 3: Weeks 7–10):**
+**Next (Phase 3: Weeks 5-7):**
 - Collect labeled clips for event taxonomy  
 - Manual annotation via `event_labels.json`  
 - Train event model v1  
@@ -364,3 +364,166 @@
 - Add Δpose / motion vectors  
 - Strengthen COCO exporter with polygons once SAM-3 masks are real  
 - Build dataset viewer notebook + CLI exports  
+
+# Week 5 (Days 29-31): Phase 3 - "Pretrained Action Module + Export Formats"
+**Date: Dec 15, 2025**
+*Goal:* Move from heuristic-only events to a credible, research-grade action/event module with labeling, training, inference, and evaluation — fully integrated into the existing pipeline.
+
+## Day 29 (Dec 15, 2025) — Data + Labeling Workflow (Foundation) ✅
+- [x] Added a canonical labeling artifact: `event_labels.json` stored alongside each `episode.json`
+- [x] Adopted a canonical taxonomy file (repo-local): `conceptops/config/event_taxonomy.json`
+- [x] Implemented label I/O and conversion layer:
+  - `conceptops/labeling/` (schemas + io)
+  - Validates taxonomy version and frame bounds
+  - Converts labeled spans → canonical `EventRecord` (schema-aligned: `event_id`, `label`, `start_frame`, `end_frame`, `score`, `metadata`)
+- [x] Added a minimal labeling tool:
+  - `scripts/label_episode_events.py`
+  - Frame inspection (OpenCV), mark start/end, add label, save JSON
+- [x] Added batch episode builder:
+  - `scripts/batch_build_episodes.py` generates `data/episodes/<clip_id>/episode.json` etc.
+**Result:** Labeling is now possible and understandable with portable, diffable artifacts.
+
+---
+
+## Day 30 (Dec 15, 2025) — Training + Inference Loop (Baseline) ✅
+- [x] Implemented training scaffolding:
+  - `conceptops/training/dataset.py` (load episodes + labels, resilient to bad/empty JSON)
+  - `conceptops/training/features.py` (7-dim handcrafted features from mask stats + frame diffs)
+  - `conceptops/training/model.py` (Tiny MLP classifier)
+  - `scripts/train_event_model.py` produces:
+    - `data/models/event_model_v0/model.pt`
+    - `labels.json`
+    - `feature_spec.json`
+- [x] Implemented standalone inference runner:
+  - `scripts/run_event_model_inference.py`
+  - Sliding-window proposals + scoring → `pred_events.json`
+- [x] Added single-episode evaluation:
+  - `conceptops/eval/metrics.py` (temporal IoU, greedy 1-1 matching, P/R/F1)
+  - `scripts/eval_event_model.py`
+**Result:** End-to-end loop works: labeled spans → trained artifact → predictions → evaluatable metrics.
+
+---
+
+## Day 31 (Dec 15, 2025) — Pipeline Integration + Batch Evaluation + Robustness ✅
+- [x] Resolved taxonomy path ambiguity:
+  - scripts accept `config/event_taxonomy.json` and fall back to `conceptops/config/...` when needed
+- [x] Fixed pipeline integration bug (no circular dependency):
+  - event detection runs on `frame_records` (Episode not constructed yet)
+  - `process_video_to_dataset` now builds `Episode` after `events` are computed
+- [x] Implemented real `ModelEventDetector` inference (no stub):
+  - Loads `model.pt + labels.json + feature_spec.json`
+  - Generates proposals, extracts features, scores spans, outputs canonical `EventRecord[]`
+  - Writes predictions into `episode.json.events`
+- [x] Added inference controls:
+  - `min_score` threshold (lowered to `0.0` temporarily for weak early models)
+  - temporal NMS-style dedup (IoU-based) to reduce overlapping duplicate outputs
+- [x] Upgraded proposal strategy:
+  - kept sliding windows for coverage
+  - added motion-guided proposals from mask area-change peaks (metadata-driven, cheap)
+- [x] Added training-side overlap handling:
+  - dominant-label-per-frame normalization to convert overlapping spans → disjoint spans for training
+  - optional per-frame training mode scaffold (planned; enabled when label volume is sufficient)
+- [x] Added batch evaluation:
+  - `scripts/batch_eval_event_model.py` compares `episode.json.events` vs `event_labels.json`
+  - micro-averaged P/R/F1 across labeled clips
+- [x] Confirmed end-to-end Phase 3 wiring on a labeled clip:
+  - `episode.json.events` contains model-produced event(s) with scores and metadata (`source: model`)
+  - batch eval runs and produces metrics (example: P=1.0, R=0.5, F1=0.67 on 1 clip)
+**Result:** Model-backed event detection runs through the canonical pipeline entrypoint and is evaluatable in batch.
+
+---
+
+## Phase 3 Status Checklist (Done Definition)
+
+### Labeling ✅
+- [x] Can label clips with a clear workflow (`event_labels.json`, taxonomy, tool)
+- [ ] Label 8–12 clips (target: 30–60+ spans across 3–5 labels) to reach credible model performance
+
+### Training ✅
+- [x] Can train baseline model from labeled clips and save artifacts
+- [x] Training tolerates messy / partial episode directories
+
+### ModelEventDetector ✅ (Wired to real model)
+- [x] Loads trained artifacts
+- [x] Produces `EventRecord[]` with scores and provenance metadata
+- [x] Integrated into `process_video_to_dataset(... e2r_config={"mode":"model", ...})`
+
+### Evaluation ✅
+- [x] Temporal IoU + greedy one-to-one matching
+- [x] Per-episode evaluation script
+- [x] Batch evaluation script (micro-averaged metrics)
+
+### Remaining for “Phase 3 done” (quality + completeness)
+- [ ] Label enough real clips to make evaluation meaningful (8–12 clips / 30–60+ spans)
+- [ ] Improve model beyond baseline as needed:
+  - optional per-frame training mode (once label volume grows)
+  - better features / representations (future)
+- [ ] Ensure tests remain green after new detector wiring (run full pytest suite)
+- [ ] (Optional) Add a “label coverage report” (counts per label, overlaps, span lengths) to guide labeling
+
+---
+
+# PHASE 4 — “DEMO + DASHBOARD” (Weeks 11–13)
+*Goal:* Turn the CLI pipeline into a publicly consumable demo that looks like a YC batch-ready product.  
+
+## Week 11 
+- [ ] Build lightweight dashboard (Streamlit/Gradio)
+- [ ] Video upload → pipeline run → visualizations
+
+## Week 12
+- [ ] Add segmentation playback
+- [ ] Add action timeline display
+- [ ] Add episode slices
+- [ ] Add dataset export button
+
+## Week 13
+- [ ] Polish UI
+- [ ] Add loading states + confidence metrics
+- [ ] Add “download dataset as zip”
+
+**Result:** Prototype becomes a product-grade demo.
+
+---
+
+# PHASE 5 — “READY FOR LAUNCH” (Weeks 14–15)
+## Deliverables
+1) **Essay V2 (polished + backed by results)**
+- [ ] Update early essay with:
+  - real visuals
+  - real examples
+  - real dataset exports
+  - real action sequences
+- [ ] Use as definitive outreach artifact (labs, founders, NVIDIA, investors, social)
+
+2) **Launch Video (30–45 seconds)**
+- [ ] Screen recording demo
+- [ ] Pipeline steps
+- [ ] Visual “beauty shots”
+
+3) **Launch GTM**
+- [ ] Website landing page
+- [ ] Tweet thread
+- [ ] Open-source repos
+- [ ] Demo link
+
+---
+
+## Day 32 (Dec 15, 2025) — Large-Scale Labeling + Dataset Maturation 🔁
+- [x] Labeled **16 real video clips** using the manual labeling workflow:
+  - `scripts/label_episode_events.py`
+  - Canonical `event_labels.json` stored alongside each `episode.json`
+- [x] Expanded labeled dataset to **39 action spans across 7 labels**:
+  - `close, move, open, pick, place, pour, wipe`
+- [x] Validated labeling integrity:
+  - All labeled clips load correctly
+  - No schema or frame-bound errors
+- [x] Re-trained baseline event model on full labeled dataset:
+  - `data/models/event_model_v1/`
+  - Confirmed artifact generation: `model.pt`, `labels.json`, `feature_spec.json`
+- [x] Re-ran full pipeline in `mode=model` using v1 artifacts:
+  - Predictions written into `episode.json.events`
+- [x] Ran batch evaluation (label-match + span-only):
+  - Span-only micro F1 ≈ **0.32** → confirms proposal/timing signal exists
+  - Label-match metrics low → classifier is current bottleneck (expected at this scale)
+
+**Result:** Phase 3 data loop is fully exercised on real labeled data. System is now data-limited (not wiring-limited), with clear next levers identified for quality improvement.

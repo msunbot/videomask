@@ -25,19 +25,15 @@ def main() -> None:
 
     episodes_root = Path(args.episodes_root)
     taxonomy_path = Path(args.taxonomy)
-    # People will naturally pass "config/event_taxonomy.json".
-    # In this repo, the canonical file lives at "conceptops/config/event_taxonomy.json".
-    # So if the user-provided path doesn't exist, try the common fallback.
     if not taxonomy_path.exists():
-        candidate = Path("conceptops") / taxonomy_path  # e.g. conceptops/config/event_taxonomy.json
+        candidate = Path("conceptops") / taxonomy_path
         if candidate.exists():
             taxonomy_path = candidate
         else:
-            raise FileNotFoundError(
-                f"Taxonomy file not found: {args.taxonomy} (also tried {candidate})"
-            )
-        out_dir = Path(args.out_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
+            raise FileNotFoundError(...)
+    # Phase 3: out_dir should always be created
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     # 1) Load labeled episodes
     labeled_eps = list(iter_labeled_episodes(episodes_root, taxonomy_path, require_labels=True))
@@ -93,7 +89,12 @@ def main() -> None:
                 X_list.append(feats)
                 y_list.append(label_to_id[lab])
 
-    print(f"Built {len(y)} training samples (one per labeled span).")
+    # Phase 3: materialize arrays before printing
+    X = np.stack(X_list, axis=0).astype(np.float32)
+    y = np.array(y_list, dtype=np.int64)
+
+    print(f"Built {len(y)} training samples (train_mode={args.train_mode}).")
+
 
     # 4) Train tiny model
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

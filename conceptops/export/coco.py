@@ -143,3 +143,124 @@ def export_coco_from_episode(
 
     out_path.write_text(json.dumps(coco_dict, indent=2), encoding="utf-8")
     return str(out_path)
+
+# ----------------------------
+# Phase 4 adapter API
+# ----------------------------
+
+def export_episode_to_coco(
+    episode_dir: Union[str, Path],
+    out_dir: Union[str, Path],
+    category_name: str = "object",
+) -> str:
+    """
+    Export COCO annotations JSON from an episode directory.
+
+    Inputs:
+      episode_dir/episode.json (required)
+      episode_dir/frames_raw/* (referenced by file_name)
+      episode_dir/masks/* or per-instance mask_path (required for bbox)
+
+    Output:
+      out_dir/annotations.json
+    """
+    episode_dir = Path(episode_dir)
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    ep_json_path = episode_dir / "episode.json"
+    if not ep_json_path.exists():
+        raise FileNotFoundError(f"episode.json not found in {episode_dir}")
+
+    episode_json: Dict[str, Any] = json.loads(ep_json_path.read_text())
+
+    frames = episode_json.get("frames", [])
+    if not isinstance(frames, list) or len(frames) == 0:
+        raise RuntimeError("episode.json contains no frames; cannot export COCO.")
+
+    images: List[Dict[str, Any]] = []
+    annotations: List[Dict[str, Any]] = []
+
+    category_id = 1
+    categories = [{"id": category_id, "name": category_name, "supercategory": "object"}]
+
+    image_id = 1
+    ann_id = 1
+
+    for fr in frames:
+        image_path = fr.get("image_path")
+        if not image_path:
+            continue
+
+        # Use basename so COCO references local image files by name.
+        file_name = os.path.basename(image_path)
+
+        # Determine image size
+        img = Image.open(image_path)
+        width, height = img.size
+
+        images.append({"id": image_id, "file_name": file_name, "width": width, "height": height})
+
+        # Instances: prefer per-instance mask_path; else fall back to frame mask_path
+        frame_mask_path = fr.get("mask_path", "")
+        instances = fr.get("instances", []) or []
+
+        if isinstance(instances, list) and len(instances) > 0:
+            for inst in instances:
+                mask_path = inst.get("mask_path") or frame_mask_path
+                if not mask_path:
+                    continue
+                bbox = _compute_bbox_from_mask(mask_path)
+                if bbox is None:
+                    continue
+                x_min, y_min, w, h = bbox
+                area = float(w * h)
+
+                annotations.append(
+                    {
+                        "id": ann_id,
+                        "image_id": image_id,
+                        "category_id": category_id,
+                        "bbox": [x_min, y_min, w, h],
+                        "area": area,
+                        "iscrowd": 0,
+                        "segmentation": [],  # bbox-only for now (valid COCO)
+                    }
+                )
+                ann_id += 1
+        else:
+            # If no instances list, you can still export one bbox from frame_mask_path if present.
+            if frame_mask_path:
+                bbox = _compute_bbox_from_mask(frame_mask_path)
+                if bbox is not None:
+                    x_min, y_min, w, h = bbox
+                    annotations.append(
+                        {
+                            "id": ann_id,
+                            "image_id": image_id,
+                            "category_id": category_id,
+                            "bbox": [x_min, y_min, w, h],
+                            "area": float(w * h),
+                            "iscrowd": 0,
+                            "segmentation": [],
+                        }
+                    )
+                    ann_id += 1
+
+        image_id += 1
+
+    coco_dict = {
+        "info": {
+            "description": "Episode exported from ConceptOps",
+            "version": "0.1",
+            "episode_id": episode_json.get("episode_id", 0),
+        },
+        "licenses": [],
+        "images": images,
+        "annotations": annotations,
+        "categories": categories,
+    }
+
+    out_path = out_dir / "annotations.json"
+    out_path.write_text(json.dumps(coco_dict, indent=2), encoding="utf-8")
+    return str(out_path)

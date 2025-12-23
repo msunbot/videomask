@@ -12,6 +12,14 @@ data/episodes/
 data/models/
 data/raw_clips/
 
+# ---- ConceptOps / Streamlit demo runtime ----
+.conceptops_demo_cache/
+.streamlit_tmp_upload/
+.streamlit/
+.streamlit_cache/
+*.mp4
+*.mov
+
 # local dev
 .vscode
 

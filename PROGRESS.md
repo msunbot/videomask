@@ -573,3 +573,90 @@
   - export buttons (LeRobot / RLDS / COCO)
   - download dataset as zip
 
+---
+
+## Day 34 (Dec 18, 2025) — Phase 4 Demo Foundations: Wiring the Real Pipeline 🧱
+
+- [x] Bootstrapped **Phase 4 demo layer** directly on top of the real integrated pipeline:
+  - Demo now calls `process_video_to_dataset` end-to-end
+  - No mock paths, no parallel demo-only pipelines
+- [x] Resolved multiple pipeline/UI mismatches uncovered during integration:
+  - Normalized episode directory resolution (temp vs `data/episodes/*`)
+  - Eliminated stale-episode bugs caused by filename reuse
+  - Added strict provenance checks between uploaded video and `episode.json.video_path`
+- [x] Verified segmentation stage correctness:
+  - Confirmed `frames_raw/`, `masks/`, `metadata.json` generation
+  - Debugged and fixed “no frames” rendering edge cases in UI
+- [x] Added **run provenance + forensic visibility**:
+  - `demo_run_manifest.json`: exact inputs, configs, timing, pipeline return
+  - `event_stage_status.json`: stage-by-stage artifact verification
+  - Removed ambiguity around “did this stage actually run?”
+
+**Result:** Phase 4 demo is now wired to the *real* pipeline with deterministic artifact resolution and provable execution. All remaining issues are quality/UX, not wiring.
+
+---
+
+## Day 35 (Dec 18, 2025) — Event Inference Integration: From Invisible to Verifiable 🎯
+
+- [x] Diagnosed root cause of “missing events” in demo:
+  - Integrated pipeline **does not write `pred_events.json` by design**
+  - Event outputs live in `episode.json.events`
+- [x] Fixed demo visibility gap without refactoring Phase 3:
+  - Materialized `pred_events.json` from `episode.json.events` post-run
+  - Ensured demo UI timeline always reflects actual event inference results
+- [x] Confirmed **event inference is truly running**:
+  - Verified via `episode.json.extra.event_config.mode`
+  - Verified proposal provenance:
+    - `proposal_method: motion_guided_from_area`
+    - `inference_profile: demo_clean_v2`
+- [x] Added hard verification commands to workflow:
+  - `jq '.events | length' episode.json`
+  - `jq '.extra.event_config' episode.json`
+
+**Result:** Event inference is no longer a “black box” in the demo. The UI now faithfully surfaces real model outputs, with clear provenance.
+
+---
+
+## Day 36 (Dec 18, 2025) — Phase 4 Demo Maturation: Model-First UX + Exports 🚀
+
+- [x] Switched demo default from heuristic → **model-based events**:
+  - Event mode selector: `model | motion | fixed`
+  - Demo now reflects the *actual value* of ConceptOps
+- [x] Exposed **model inference controls** in the UI:
+  - `topk`, `min_score`, `nms_iou`, `window_size`, `stride`
+  - Enables event density tuning for demo and debugging
+- [x] Restored and stabilized **export surface**:
+  - COCO / RLDS / LeRobot adapters fixed
+  - JSON artifacts generated correctly from `episode.json`
+  - One-click download buttons + persisted files on disk
+- [x] Finalized core demo UX loop:
+  - Segmentation playback
+  - Event timeline (demo_clean_v2)
+  - Click event → slice viewer
+  - Export + dataset download
+
+**Known Limitation (Accepted for Phase 4):**
+- Local runs use **dummy segmentation**, producing static masks
+- This limits motion signal and often collapses events to 1 span
+- Root cause is environment (no SAM-3), not model correctness
+
+**Result:** Phase 4 demo is **functionally complete and model-backed**. Remaining gap is visual fidelity, not system correctness.
+
+---
+
+## Phase 4 Status (End of Day 36)
+
+**Phase 4 is now:**
+- ✅ Fully wired to the real pipeline
+- ✅ Model-first (not heuristic-first)
+- ✅ Export-capable
+- ✅ Provenance-safe and debuggable
+
+**Next (Phase 4.5 — Demo Wow / Launch Prep):**
+- Run Streamlit on a **GPU environment with SAM-3**
+- Record launch demo with dynamic masks + richer event timelines
+- Capture 30–45s launch video showing:
+  - real segmentation
+  - multi-event timelines
+  - slice navigation
+  - export artifacts

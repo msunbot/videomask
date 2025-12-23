@@ -8,6 +8,7 @@ dependencies = [
     "Pillow",
     "opencv-python",
     "click",
+    "streamlit",
 ]
 
 [project.scripts]

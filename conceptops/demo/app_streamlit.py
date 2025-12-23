@@ -148,7 +148,7 @@ with st.sidebar:
         e2r_config.update({"frames_per_event": int(frames_per_event), "base_label": base_label})
 
     st.divider()
-    run_btn = st.button("▶ Run pipeline", use_container_width=True)
+    run_btn = st.button("▶ Run pipeline")
 
 
 # ---------------- Upload resolution ----------------
@@ -228,14 +228,14 @@ with col_left:
         frame_idx = st.slider("Frame index", min_value=0, max_value=max(0, num_frames - 1), value=0)
         img = overlay_frame_with_mask(episode_dir=episode_dir, frame_idx=frame_idx, overlay_alpha=0.55)
         if img is not None:
-            st.image(img, use_container_width=True)
+            st.image(img)
 
 with col_right:
     st.subheader("Event Timeline (Hero Feature)")
     st.caption("If you have only 1 event, you will see a single bar. Tune min_score/topk to increase event density.")
 
     fig = build_event_timeline_plotly(pred_events, total_frames=max(num_frames, 1))
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig)
 
     chosen_event = None
     if pred_events:
@@ -265,13 +265,12 @@ with c1:
         data=zip_directory_to_bytes(episode_dir),
         file_name=f"{episode_dir.name}.zip",
         mime="application/zip",
-        use_container_width=True,
     )
 
 export_paths = st.session_state.get(EXPORT_PATHS_KEY, {}) or {}
 
 with c2:
-    if st.button("Export: COCO", use_container_width=True):
+    if st.button("Export: COCO"):
         ok, msg = run.try_export("coco")
         (st.success if ok else st.warning)(msg)
         if ok:
@@ -279,7 +278,7 @@ with c2:
             st.session_state[EXPORT_PATHS_KEY] = export_paths
 
 with c3:
-    if st.button("Export: RLDS", use_container_width=True):
+    if st.button("Export: RLDS"):
         ok, msg = run.try_export("rlds")
         (st.success if ok else st.warning)(msg)
         if ok:
@@ -287,7 +286,7 @@ with c3:
             st.session_state[EXPORT_PATHS_KEY] = export_paths
 
 with c4:
-    if st.button("Export: LeRobot", use_container_width=True):
+    if st.button("Export: LeRobot"):
         ok, msg = run.try_export("lerobot")
         (st.success if ok else st.warning)(msg)
         if ok:

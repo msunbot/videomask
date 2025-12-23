@@ -189,7 +189,7 @@ def render_event_slice_gallery(
 
     cols = st.columns(3)
     for i, img in enumerate(imgs):
-        cols[i % 3].image(img, use_container_width=True, caption=f"frame {idxs[i]}")
+        cols[i % 3].image(img, use_column_width=True, caption=f"frame {idxs[i]}")
 
 
 def zip_directory_to_bytes(dir_path: Path) -> bytes:

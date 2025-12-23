@@ -1,0 +1,13 @@
+streamlit==1.37.1
+plotly
+pandas
+pillow>=10.2.0,<11
+imageio[ffmpeg]
+opencv-python-headless
+opencv-python
+huggingface_hub>=0.34,<1.0
+iopath>=0.1.10
+regex
+timm>=1.0.17
+tqdm
+einops

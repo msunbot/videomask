@@ -660,3 +660,69 @@
   - multi-event timelines
   - slice navigation
   - export artifacts
+
+---
+
+## Day 37–39 (Dec 23–25, 2025) — Phase 4.5 GPU Demo Attempt: Runpod + SAM-3 (Abandoned) ⚠️
+
+- [x] Attempted to run Phase 4 Streamlit demo on **Runpod GPU** to unlock SAM-3 segmentation:
+  - Set up remote GPU environment, SSH access, exposed HTTP ports
+  - Installed CUDA-enabled PyTorch + SAM-3 dependencies
+- [x] Diagnosed multiple environment-level blockers:
+  - Python / Streamlit version incompatibilities (`use_container_width` API drift)
+  - Missing CLIP BPE assets required by SAM-3
+  - HF gated model auth + transient container resets
+  - Mask outputs silently collapsing to empty due to save-format issues
+- [x] Verified that failures were **infrastructure/UI-layer**, not pipeline logic:
+  - Event inference + exports worked when masks were non-empty
+  - TinyEventMLP artifacts (`model.pt`, `labels.json`) loaded correctly
+- [x] Made the explicit call to **abandon Runpod + Streamlit path**:
+  - Too fragile for a launch demo
+  - High setup cost with low reliability
+
+**Result:** Learned exactly where the failure modes are. Confirmed the core system is sound, but Streamlit-on-GPU is not a launch-safe surface.
+
+---
+
+## Day 40–41 (Dec 30, 2025) — Phase 4.5 Pivot: Colab-Only Launch Demo (Success) ✨
+
+- [x] Pivoted demo surface from Streamlit → **single Colab notebook** (top-to-bottom, deterministic):
+  - Eliminated all UI framework instability
+  - Optimized for speed, clarity, and recording reliability
+- [x] Achieved **real SAM-3 segmentation** in Colab GPU:
+  - Dynamic, non-empty masks on 16–18 sampled frames
+  - Verified via pixel counts + overlay grids
+- [x] Successfully ran **Phase 3 TinyEventMLP** on fixed-window proposals:
+  - Labels: `manipulate`, `move`, `toggle`
+  - Model outputs verified via full probability distributions
+- [x] Produced **clean, launch-ready event timeline**:
+  - Non-overlapping detected events
+  - No mock labels, no probability clutter
+  - Clear frame-based x-axis
+- [x] Implemented **inspectability**:
+  - Event slice viewer with SAM-3 overlays
+  - Boundary thumbnails per event
+- [x] Verified **end-to-end dataset exports** on disk:
+  - `episode.json`
+  - `pred_events.json`
+  - COCO / RLDS / LeRobot JSONs
+  - Full `demo_out/` directory tree proven
+- [x] Finalized **30–45s launch recording plan**:
+  - Segmentation proof → event timeline → slice viewer → exports
+
+**Result:** Phase 4.5 is now **launch-ready**. ConceptOps’ core value—turning raw video into inspectable, exportable training data—is demonstrated clearly, honestly, and reliably.
+
+---
+
+## Phase 4.5 Status (End of Day 41)
+
+**Phase 4.5 is now:**
+- ✅ GPU-backed (SAM-3)
+- ✅ Model-backed (TinyEventMLP)
+- ✅ UI-light (Colab-only)
+- ✅ Recording-safe and reproducible
+
+**Next (Phase 5 — Launch):**
+- Commit Colab notebook to repo
+- Record 30–45s launch demo
+- Publish launch essay + demo video
